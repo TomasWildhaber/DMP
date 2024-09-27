@@ -9,3 +9,9 @@ bin-int/
 *.vcxproj.filters
 *.vcxproj.user
 *.ini
+
+# make files
+Makefile
+
+# visual studip code files
+.vscode
