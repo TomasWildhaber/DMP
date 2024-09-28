@@ -16,6 +16,7 @@ project "Server"
     includedirs
     {
         "src",
+        "$(SolutionDir)Core/src",
     }
 
     links

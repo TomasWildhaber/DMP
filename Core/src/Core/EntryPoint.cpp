@@ -1,13 +1,16 @@
 #pragma once
-#include <iostream>
+#include "Application.h"
 
 #ifdef PLATFORM_WINDOWS
 
+extern Core::Application* Core::CreateApplication(Core::CommandArgs args);
+
 int Main(int argc, char** argv)
 {
-	std::cout << "Works!" << std::endl;
+	Core::Application* app = Core::CreateApplication({ argc, argv });
+	app->Run();
+	delete app;
 
-	std::cin.get();
 	return 0;
 }
 

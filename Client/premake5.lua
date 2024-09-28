@@ -15,6 +15,7 @@ project "Client"
     includedirs
     {
         "src",
+        "$(SolutionDir)Core/src",
     }
 
     links
