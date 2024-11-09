@@ -1,9 +1,7 @@
 #pragma once
 #include "Application.h"
 
-#ifdef PLATFORM_WINDOWS
-
-extern Core::Application* Core::CreateApplication(Core::CommandArgs args);
+extern Core::Application* Core::CreateApplication(const Core::CommandArgs& args);
 
 int Main(int argc, char** argv)
 {
@@ -14,7 +12,9 @@ int Main(int argc, char** argv)
 	return 0;
 }
 
-#ifndef DISTRIBUTION_CONFIG
+#ifdef PLATFORM_WINDOWS
+
+#if !defined(DISTRIBUTION_CONFIG) || defined(SYSTEM_CONSOLE)
 int main(int argc, char** argv)
 {
 	return Main(argc, argv);

@@ -1,3 +1,4 @@
+#include "Core/EntryPoint.h"
 #include "ClientApp.h"
 
 namespace Client
@@ -8,7 +9,7 @@ namespace Client
 	}
 }
 
-Core::Application* Core::CreateApplication(Core::CommandArgs args)
+Core::Application* Core::CreateApplication(const Core::CommandArgs& args)
 {
 	Core::ApplicationSpecifications specs;
 	specs.Title = "Client";

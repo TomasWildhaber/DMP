@@ -36,5 +36,5 @@ namespace Core
 		static inline Application* instance = nullptr;
 	};
 
-	Application* CreateApplication(CommandArgs args);
+	Application* CreateApplication(const CommandArgs& args);
 }

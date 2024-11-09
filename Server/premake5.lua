@@ -24,6 +24,8 @@ project "Server"
         "Core"
     }
 
+    defines { "SYSTEM_CONSOLE" }
+
     filter "configurations:Debug"
 		defines "DEBUG_CONFIG"
 		runtime "Debug"

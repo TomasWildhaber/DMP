@@ -1,3 +1,4 @@
+#include "Core/EntryPoint.h"
 #include "ServerApp.h"
 
 namespace Server
@@ -8,7 +9,7 @@ namespace Server
 	}
 }
 
-Core::Application* Core::CreateApplication(Core::CommandArgs args)
+Core::Application* Core::CreateApplication(const Core::CommandArgs& args)
 {
 	Core::ApplicationSpecifications specs;
 	specs.Title = "Server";
