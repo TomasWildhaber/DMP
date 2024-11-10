@@ -7,6 +7,9 @@ project "Server"
     targetdir (outputdir .. "$(Configuration)/$(ProjectName)")
 	objdir (intoutputdir .. "$(Configuration)/$(ProjectName)")
 
+    pchheader "pch.h"
+	pchsource "src/pch.cpp"
+
     files
 	{
 		"src/**.h",

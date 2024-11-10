@@ -1,11 +1,13 @@
+#include "pch.h"
 #include "Core/EntryPoint.h"
+#include "Debugging/Log.h"
 #include "ServerApp.h"
 
 namespace Server
 {
 	ServerApp::ServerApp(const Core::ApplicationSpecifications& specs) : Core::Application(specs)
 	{
-
+		SetLoggerTitle("Server");
 	}
 }
 

@@ -55,7 +55,7 @@ public:
 			std::vector<std::any> args = { _args... };
 
 			GetLoggerTime();
-			std::cout << "\033[35m[" << timebuffer << "] APP DEBUG: ";
+			std::cout << "\033[35m[" << timebuffer << "] " << Title << " DEBUG: ";
 			while (*message)
 			{
 				if (*message == '{' && *(message + 2) == '}')
@@ -83,7 +83,7 @@ public:
 			std::vector<std::any> args = { _args... };
 
 			GetLoggerTime();
-			std::cout << "\033[32m[" << timebuffer << "] APP INFO: ";
+			std::cout << "\033[32m[" << timebuffer << "] " << Title << " INFO: ";
 			while (*message)
 			{
 				if (*message == '{' && *(message + 2) == '}')
@@ -111,7 +111,7 @@ public:
 			std::vector<std::any> args = { _args... };
 
 			GetLoggerTime();
-			std::cout << "\033[33m[" << timebuffer << "] APP WARNING: ";
+			std::cout << "\033[33m[" << timebuffer << "] " << Title << " WARNING: ";
 			while (*message)
 			{
 				if (*message == '{' && *(message + 2) == '}')
@@ -139,7 +139,147 @@ public:
 			std::vector<std::any> args = { _args... };
 
 			GetLoggerTime();
-			std::cout << "\033[31m[" << timebuffer << "] APP ERROR: ";
+			std::cout << "\033[31m[" << timebuffer << "] " << Title << " ERROR: ";
+			while (*message)
+			{
+				if (*message == '{' && *(message + 2) == '}')
+				{
+					int i = *(message + 1) - 48;
+					printArg(args, i);
+					message += 3;
+				}
+				else
+				{
+					std::cout << *message;
+					message++;
+				}
+			}
+
+			std::cout << std::endl;
+		}
+	}
+
+	template<typename... Args>
+	static void TraceCore(const char* message, Args&&... _args)
+	{
+		if (level == Level::Trace)
+		{
+			std::vector<std::any> args = { _args... };
+
+			GetLoggerTime();
+			std::cout << "\033[94m[" << timebuffer << "] CORE TRACE: ";
+			while (*message)
+			{
+				if (*message == '{' && *(message + 2) == '}')
+				{
+					int i = *(message + 1) - 48;
+					printArg(args, i);
+					message += 3;
+				}
+				else
+				{
+					std::cout << *message;
+					message++;
+				}
+			}
+
+			std::cout << std::endl;
+		}
+	}
+
+	template<typename... Args>
+	static void DebugCore(const char* message, Args&&... _args)
+	{
+		if (level <= Level::Debug)
+		{
+			std::vector<std::any> args = { _args... };
+
+			GetLoggerTime();
+			std::cout << "\033[35m[" << timebuffer << "] CORE DEBUG: ";
+			while (*message)
+			{
+				if (*message == '{' && *(message + 2) == '}')
+				{
+					int i = *(message + 1) - 48;
+					printArg(args, i);
+					message += 3;
+				}
+				else
+				{
+					std::cout << *message;
+					message++;
+				}
+			}
+
+			std::cout << std::endl;
+		}
+	}
+
+	template<typename... Args>
+	static void InfoCore(const char* message, Args&&... _args)
+	{
+		if (level <= Level::Info)
+		{
+			std::vector<std::any> args = { _args... };
+
+			GetLoggerTime();
+			std::cout << "\033[32m[" << timebuffer << "] CORE INFO: ";
+			while (*message)
+			{
+				if (*message == '{' && *(message + 2) == '}')
+				{
+					int i = *(message + 1) - 48;
+					printArg(args, i);
+					message += 3;
+				}
+				else
+				{
+					std::cout << *message;
+					message++;
+				}
+			}
+
+			std::cout << std::endl;
+		}
+	}
+
+	template<typename... Args>
+	static void WarnCore(const char* message, Args&&... _args)
+	{
+		if (level <= Level::Warn)
+		{
+			std::vector<std::any> args = { _args... };
+
+			GetLoggerTime();
+			std::cout << "\033[33m[" << timebuffer << "] CORE WARNING: ";
+			while (*message)
+			{
+				if (*message == '{' && *(message + 2) == '}')
+				{
+					int i = *(message + 1) - 48;
+					printArg(args, i);
+					message += 3;
+				}
+				else
+				{
+					std::cout << *message;
+					message++;
+				}
+			}
+
+			std::cout << std::endl;
+		}
+	}
+
+	template<typename... Args>
+	static void ErrorCore(const char* message, Args&&... _args)
+	{
+		if (level <= Level::Error)
+		{
+			std::vector<std::any> args = { _args... };
+
+			GetLoggerTime();
+			std::cout << "\033[31m[" << timebuffer << "] CORE ERROR: ";
 			while (*message)
 			{
 				if (*message == '{' && *(message + 2) == '}')

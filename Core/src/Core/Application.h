@@ -25,8 +25,6 @@ namespace Core
 		Application(const Application& other) = delete;
 		Application(const Application&& other) = delete;
 
-		virtual ~Application() = default;
-
 		void Run();
 
 		static inline Application& Get() { return *instance; }

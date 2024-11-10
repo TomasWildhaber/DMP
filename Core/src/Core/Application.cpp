@@ -1,5 +1,6 @@
+#include "pch.h"
 #include "Application.h"
-#include <iostream>
+#include "Debugging/Log.h"
 
 namespace Core
 {
@@ -7,12 +8,12 @@ namespace Core
 	{
 		instance = this;
 
-		std::cout << specs.Title << " application init" << std::endl;
+		TRACE("{0} application init", specs.Title);
 	}
 
 	void Application::Run()
 	{
-		std::cout << "Works!" << std::endl;
+		TRACE("Works!");
 
 		std::cin.get();
 	}

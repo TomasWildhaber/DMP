@@ -19,10 +19,6 @@ workspace "DMP"
 	outputdir = "$(SolutionDir)bin/"
 	intoutputdir = "$(SolutionDir)bin-int/"
 
-	group "vendor"
-
-	group ""
-
 	defines { "_CRT_SECURE_NO_WARNINGS" }
 
 	filter "system:windows"
@@ -42,6 +38,10 @@ workspace "DMP"
 		defines "DISTRIBUTION_CONFIG"
 		runtime "Release"
 		optimize "on"
+
+group "vendor"
+	include "vendor/glfw"
+group ""
 
 include "Core"
 include "Server"
