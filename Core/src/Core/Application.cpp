@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Application.h"
 #include "Debugging/Log.h"
+#include "GLFW/glfw3.h"
 
 namespace Core
 {
@@ -9,12 +10,27 @@ namespace Core
 		instance = this;
 
 		TRACE("{0} application init", specs.Title);
+
+		if (specs.HasWindow)
+		{
+			window = CreateRef<Window>(specs.WindowWidth, specs.WindowHeight, specs.Title);
+			window->ShowWindow();
+		}
 	}
 
 	void Application::Run()
 	{
 		TRACE("Works!");
 
-		std::cin.get();
+		if (specs.HasWindow)
+		{
+			while (!glfwWindowShouldClose((GLFWwindow*)window->GetNativeWindow()))
+			{
+				window->OnUpdate();
+				window->OnRender();
+			}
+		}
+		else
+			std::cin.get();
 	}
 }

@@ -14,8 +14,10 @@ namespace Client
 Core::Application* Core::CreateApplication(const Core::CommandArgs& args)
 {
 	Core::ApplicationSpecifications specs;
-	specs.Title = "Client";
 	specs.Args = args;
+	specs.Title = "Client";
+	specs.WindowWidth = 1280;
+	specs.WindowHeight = 720;
 
 	return new Client::ClientApp(specs);
 }

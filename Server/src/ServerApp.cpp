@@ -16,6 +16,7 @@ Core::Application* Core::CreateApplication(const Core::CommandArgs& args)
 	Core::ApplicationSpecifications specs;
 	specs.Title = "Server";
 	specs.Args = args;
+	specs.HasWindow = false;
 
 	return new Server::ServerApp(specs);
 }

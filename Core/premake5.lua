@@ -19,6 +19,7 @@ project "Core"
     includedirs
     {
         "src",
+		"$(SolutionDir)vendor/glfw/include",
     }
 
 	links

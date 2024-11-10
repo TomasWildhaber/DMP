@@ -1,4 +1,6 @@
 #pragma once
+#include "Utils/Memory.h"
+#include "Window.h"
 
 namespace Core
 {
@@ -15,6 +17,9 @@ namespace Core
 	{
 		const char* Title;
 		CommandArgs Args;
+		bool HasWindow = true;
+		int WindowWidth;
+		int WindowHeight;
 	};
 
 	class Application
@@ -30,6 +35,7 @@ namespace Core
 		static inline Application& Get() { return *instance; }
 	private:
 		ApplicationSpecifications specs;
+		Ref<Window> window;
 
 		static inline Application* instance = nullptr;
 	};
