@@ -1,6 +1,7 @@
 #pragma once
 #include "Utils/Memory.h"
 #include "Window.h"
+#include "Event/Events.h"
 
 namespace Core
 {
@@ -30,13 +31,20 @@ namespace Core
 		Application(const Application& other) = delete;
 		Application(const Application&& other) = delete;
 
+		void OnEvent(Event& e);
 		void Run();
 
+		static inline bool IsApplicationRunning() { return isApplicationRunning; }
 		static inline Application& Get() { return *instance; }
 	private:
+		void OnWindowClose(WindowClosedEvent& e);
+
 		ApplicationSpecifications specs;
 		Ref<Window> window;
 
+		bool isRunning = true;
+
+		static inline bool isApplicationRunning = true;
 		static inline Application* instance = nullptr;
 	};
 

@@ -5,9 +5,12 @@ extern Core::Application* Core::CreateApplication(const Core::CommandArgs& args)
 
 int Main(int argc, char** argv)
 {
-	Core::Application* app = Core::CreateApplication({ argc, argv });
-	app->Run();
-	delete app;
+	while (Core::Application::IsApplicationRunning())
+	{
+		Core::Application* app = Core::CreateApplication({ argc, argv });
+		app->Run();
+		delete app;
+	}
 
 	return 0;
 }

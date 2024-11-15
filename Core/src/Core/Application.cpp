@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "Application.h"
 #include "Debugging/Log.h"
-#include "GLFW/glfw3.h"
 
 namespace Core
 {
@@ -14,8 +13,14 @@ namespace Core
 		if (specs.HasWindow)
 		{
 			window = CreateRef<Window>(specs.WindowWidth, specs.WindowHeight, specs.Title);
+			window->SetEventCallbackFunction([this](Event& e) { OnEvent(e); });
 			window->ShowWindow();
 		}
+	}
+
+	void Application::OnEvent(Event& e)
+	{
+		Event::Dispatch<WindowClosedEvent>(e, [this](WindowClosedEvent& e) { OnWindowClose(e); });
 	}
 
 	void Application::Run()
@@ -24,7 +29,7 @@ namespace Core
 
 		if (specs.HasWindow)
 		{
-			while (!glfwWindowShouldClose((GLFWwindow*)window->GetNativeWindow()))
+			while (isRunning)
 			{
 				window->OnUpdate();
 				window->OnRender();
@@ -32,5 +37,11 @@ namespace Core
 		}
 		else
 			std::cin.get();
+	}
+
+	void Application::OnWindowClose(WindowClosedEvent& e)
+	{
+		isRunning = false;
+		isApplicationRunning = false;
 	}
 }
