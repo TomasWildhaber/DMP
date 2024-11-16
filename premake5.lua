@@ -41,6 +41,7 @@ workspace "DMP"
 
 group "vendor"
 	include "vendor/glfw"
+	include "vendor/imgui"
 group ""
 
 include "Core"

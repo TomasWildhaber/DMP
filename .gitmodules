@@ -2,3 +2,7 @@
 	path = vendor/glfw
 	url = https://github.com/TomasWildhaber/glfw.git
 	branch = DMP
+[submodule "vendor/imgui"]
+	path = vendor/imgui
+	url = https://github.com/TomasWildhaber/imgui
+	branch = DMP

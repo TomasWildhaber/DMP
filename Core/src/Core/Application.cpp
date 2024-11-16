@@ -36,7 +36,10 @@ namespace Core
 			}
 		}
 		else
+		{
 			std::cin.get();
+			isApplicationRunning = false;
+		}
 	}
 
 	void Application::OnWindowClose(WindowClosedEvent& e)

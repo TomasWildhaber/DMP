@@ -23,7 +23,8 @@ project "Client"
 
     links
     {
-        "Core"
+        "Core",
+        "ImGui",
     }
 
     filter "configurations:Debug"

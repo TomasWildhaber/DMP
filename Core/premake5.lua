@@ -25,6 +25,7 @@ project "Core"
 	links
 	{
 		"GLFW",
+		"ImGUi",
 	}
 
 	defines { "CORE" }
