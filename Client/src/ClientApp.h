@@ -7,5 +7,7 @@ namespace Client
 	{
 	public:
 		ClientApp(const Core::ApplicationSpecifications& specs);
+
+		void Render();
 	};
 }

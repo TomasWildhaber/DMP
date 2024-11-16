@@ -20,6 +20,7 @@ namespace Core
 
 	void Application::OnEvent(Event& e)
 	{
+		Event::Dispatch<WindowResizedEvent>(e, [this](WindowResizedEvent& e) { window->OnResize(e); });
 		Event::Dispatch<WindowClosedEvent>(e, [this](WindowClosedEvent& e) { OnWindowClose(e); });
 	}
 

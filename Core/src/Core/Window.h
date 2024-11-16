@@ -10,6 +10,7 @@ namespace Core
 	class Window
 	{
 		using EventCallbackFunction = std::function<void(Event&)>;
+		using RenderFunction = std::function<void()>;
 	public:
 		Window(int Width, int Height, const char* Title);
 		~Window();
@@ -17,6 +18,7 @@ namespace Core
 		void OnUpdate() const;
 		void OnRender() const;
 
+		void SetRenderFunction(const RenderFunction& function) { data.renderFunction = function; }
 		void SetEventCallbackFunction(const EventCallbackFunction& callback) { data.callbackFunction = callback; }
 
 		inline int GetWidth() const { return data.width; }
@@ -37,6 +39,8 @@ namespace Core
 		void ShowWindow() const;
 		void HideWindow() const;
 		void CloseWindow() { WindowClosedEvent e; data.callbackFunction(e); }
+
+		void OnResize(WindowResizedEvent& e);
 	private:
 		void setCallbacks();
 
@@ -45,6 +49,7 @@ namespace Core
 			int x, y, width, height;
 			bool isVsync = false;
 			EventCallbackFunction callbackFunction;
+			RenderFunction renderFunction;
 		};
 
 		GLFWwindow* window;

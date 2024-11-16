@@ -3,6 +3,9 @@
 #include <Debugging/Log.h>
 #include "Event/Events.h"
 #include "GLFW/glfw3.h"
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
 
 namespace Core
 {
@@ -20,10 +23,24 @@ namespace Core
 		glfwSetWindowUserPointer(window, &data);
 		setCallbacks();
 		SetVSync(true);
+
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+
+		ImGuiIO& io = ImGui::GetIO();
+		io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors | ImGuiBackendFlags_HasSetMousePos;
+		io.DisplaySize = ImVec2((float)data.width, (float)data.height);
+
+		ImGui_ImplOpenGL3_Init();
+		ImGui_ImplGlfw_InitForOpenGL(window, true);
 	}
 
 	Window::~Window()
 	{
+		ImGui_ImplOpenGL3_Shutdown();
+		ImGui_ImplGlfw_Shutdown();
+		ImGui::DestroyContext();
+
 		glfwDestroyWindow(window);
 		glfwTerminate();
 	}
@@ -35,7 +52,24 @@ namespace Core
 
 	void Window::OnRender() const
 	{
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+
+		data.renderFunction();
+
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+		ImGui::EndFrame();
+
 		glfwSwapBuffers(window);
+	}
+
+	void Window::OnResize(WindowResizedEvent& e)
+	{
+		ImGui::GetIO().DisplaySize = ImVec2((float)data.width, (float)data.height);
 	}
 
 	void Window::setCallbacks()

@@ -31,12 +31,14 @@ namespace Core
 		Application(const Application& other) = delete;
 		Application(const Application&& other) = delete;
 
+		virtual ~Application() = default;
+
 		void OnEvent(Event& e);
 		void Run();
 
 		static inline bool IsApplicationRunning() { return isApplicationRunning; }
 		static inline Application& Get() { return *instance; }
-	private:
+	protected:
 		void OnWindowClose(WindowClosedEvent& e);
 
 		ApplicationSpecifications specs;

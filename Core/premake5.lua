@@ -20,12 +20,14 @@ project "Core"
     {
         "src",
 		"$(SolutionDir)vendor/glfw/include",
+		"$(SolutionDir)vendor/imgui/src",
     }
 
 	links
 	{
+		"opengl32.lib",
 		"GLFW",
-		"ImGUi",
+		"ImGui",
 	}
 
 	defines { "CORE" }

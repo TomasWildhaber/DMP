@@ -19,6 +19,7 @@ project "Client"
     {
         "src",
         "$(SolutionDir)Core/src",
+        "$(SolutionDir)vendor/imgui/src",
     }
 
     links
