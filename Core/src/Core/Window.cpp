@@ -1,11 +1,11 @@
 #include "pch.h"
 #include "Window.h"
 #include <Debugging/Log.h>
+#include <GLFW/glfw3.h>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 #include "Event/Events.h"
-#include "GLFW/glfw3.h"
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
 
 namespace Core
 {
@@ -33,6 +33,8 @@ namespace Core
 
 		ImGui_ImplOpenGL3_Init();
 		ImGui_ImplGlfw_InitForOpenGL(window, true);
+
+		glEnable(0x809D); // Enable multisampling
 	}
 
 	Window::~Window()
@@ -181,7 +183,7 @@ namespace Core
 
 	inline bool Window::IsMaximized() const
 	{
-		glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
+		return glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
 	}
 
 	void Window::MaximizeWindow() const
