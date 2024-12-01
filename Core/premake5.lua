@@ -20,6 +20,7 @@ project "Core"
     {
         "src",
 		"$(SolutionDir)vendor/glfw/include",
+		"$(SolutionDir)vendor/GameNetworkingSockets/include",
 		"$(SolutionDir)vendor/imgui/src",
     }
 
@@ -31,6 +32,15 @@ project "Core"
 	}
 
 	defines { "CORE" }
+
+	filter { "platforms:windows", "configurations:Debug" }
+		links "vendor/GameNetworkingSockets/bin/Windows/Debug/GameNetworkingSockets_s.lib"
+
+	filter { "platforms:windows", "configurations:Release" }
+		links "vendor/GameNetworkingSockets/bin/Windows/Release/GameNetworkingSockets_s.lib"
+
+	filter { "platforms:windows", "configurations:Distribution" }
+		links "vendor/GameNetworkingSockets/bin/Windows/Distribution/GameNetworkingSockets_s.lib"
 
     filter "configurations:Debug"
 		defines "DEBUG_CONFIG"

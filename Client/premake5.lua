@@ -20,6 +20,7 @@ project "Client"
         "src",
         "$(SolutionDir)Core/src",
         "$(SolutionDir)vendor/imgui/src",
+        "$(SolutionDir)vendor/GameNetworkingSockets/include",
     }
 
     links
