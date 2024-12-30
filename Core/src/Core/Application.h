@@ -33,8 +33,10 @@ namespace Core
 
 		virtual ~Application() = default;
 
-		void OnEvent(Event& e);
+		virtual void OnEvent(Event& e);
 		void Run();
+
+		virtual void ProcessMessageQueue() = 0;
 
 		static inline bool IsApplicationRunning() { return isApplicationRunning; }
 		static inline Application& Get() { return *instance; }

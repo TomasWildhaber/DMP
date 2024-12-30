@@ -7,6 +7,9 @@
 #include <functional>
 #include <random>
 #include <xhash>
+#include <deque>
+
+#include <mutex>
 
 #include <string>
 #include <sstream>

@@ -20,7 +20,6 @@ project "Server"
     {
         "src",
         "$(SolutionDir)Core/src",
-        "$(SolutionDir)vendor/GameNetworkingSockets/include",
     }
 
     links

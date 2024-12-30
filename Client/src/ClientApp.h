@@ -1,5 +1,7 @@
 #pragma once
 #include "Core/Application.h"
+#include "Networking/NetworkClientInterface.h"
+#include "Networking/MessageQueue.h"
 
 struct ImFont;
 
@@ -19,10 +21,22 @@ namespace Client
 	public:
 		ClientApp(const Core::ApplicationSpecifications& specs);
 
-		void Render();
+		virtual void OnEvent(Core::Event& e) override;
+		virtual void ProcessMessageQueue() override;
+		void ProcessMessage();
 
-		void SetStyle();
+		void Render();
 	private:
+		void SetStyle();
+
+		void OnConnect(Core::ConnectedEvent& e);
+		void OnDisconnect(Core::DisconnectedEvent& e);
+		void OnMessageSent(Core::MessageSentEvent& e);
+		void OnMessageAccepted(Core::MessageAcceptedEvent& e);
+
+		Ref<Core::NetworkClientInterface> networkInterface;
+		Core::MessageQueue messageQueue;
+
 		FontMap fonts;
 		ClientState state = ClientState::None;
 	};

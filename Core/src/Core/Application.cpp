@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Application.h"
 #include "Debugging/Log.h"
+#include <csignal>
 
 namespace Core
 {
@@ -16,6 +17,18 @@ namespace Core
 			window->SetEventCallbackFunction([this](Event& e) { OnEvent(e); });
 			window->ShowWindow();
 		}
+		else
+		{
+			signal(SIGINT, [](int) {
+				WindowClosedEvent event;
+				Application::Get().OnEvent(event);
+			});
+
+			signal(SIGTERM, [](int) {
+				WindowClosedEvent event;
+				Application::Get().OnEvent(event);
+			});
+		}
 	}
 
 	void Application::OnEvent(Event& e)
@@ -26,20 +39,15 @@ namespace Core
 
 	void Application::Run()
 	{
-		TRACE("Works!");
-
-		if (specs.HasWindow)
+		while (isRunning)
 		{
-			while (isRunning)
+			ProcessMessageQueue();
+
+			if (specs.HasWindow)
 			{
 				window->OnUpdate();
 				window->OnRender();
 			}
-		}
-		else
-		{
-			std::cin.get();
-			isApplicationRunning = false;
 		}
 	}
 

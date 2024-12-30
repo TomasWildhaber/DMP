@@ -6,3 +6,7 @@
 	path = vendor/imgui
 	url = https://github.com/TomasWildhaber/imgui
 	branch = DMP
+[submodule "vendor/asio"]
+	path = vendor/asio
+	url = https://github.com/TomasWildhaber/asio.git
+	branch = DMP

@@ -8,6 +8,7 @@ namespace Core
 		WindowClosed, WindowResized, WindowFocused, WindowMoved,
 		KeyPressed, KeyReleased, KeyTyped,
 		MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled,
+		ConnectedEvent, DisconnectedEvent, MessageSent, MessageAccepted
 	};
 
 	class Event

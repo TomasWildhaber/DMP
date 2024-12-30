@@ -2,19 +2,64 @@
 #include <imgui.h>
 #include "ClientApp.h"
 #include "Core/EntryPoint.h"
+#include "Utils/Buffer.h"
 #include "Debugging/Log.h"
 #include "Resources/Fonts.h"
+
 
 namespace Client
 {
 	ClientApp::ClientApp(const Core::ApplicationSpecifications& specs) : Core::Application(specs)
 	{
 		SetLoggerTitle("Client");
+
+		networkInterface = Core::NetworkClientInterface::Create("127.0.0.1", 20000, messageQueue);
 		window->SetRenderFunction([this]() { Render(); });
 		SetStyle();
 
 		if (state == ClientState::None)
 			state = ClientState::Login;
+	}
+
+	void ClientApp::OnEvent(Core::Event& e)
+	{
+		Application::OnEvent(e);
+
+		Core::Event::Dispatch<Core::ConnectedEvent>(e, [this](Core::ConnectedEvent& e) { OnConnect(e); });
+		Core::Event::Dispatch<Core::DisconnectedEvent>(e, [this](Core::DisconnectedEvent& e) { OnDisconnect(e); });
+		Core::Event::Dispatch<Core::MessageSentEvent>(e, [this](Core::MessageSentEvent& e) { OnMessageSent(e); });
+		Core::Event::Dispatch<Core::MessageAcceptedEvent>(e, [this](Core::MessageAcceptedEvent& e) { OnMessageAccepted(e); });
+	}
+
+	void ClientApp::ProcessMessageQueue()
+	{
+		for (uint32_t i = 0; i < messageQueue.GetCount(); i++)
+			ProcessMessage();
+	}
+
+	void ClientApp::ProcessMessage()
+	{
+		messageQueue.Pop();
+	}
+
+	void ClientApp::OnConnect(Core::ConnectedEvent& e)
+	{
+		INFO("Connected to {0} on port {1}", e.GetDomain(), e.GetPort());
+	}
+
+	void ClientApp::OnDisconnect(Core::DisconnectedEvent& e)
+	{
+		ERROR("Connection lost!");
+	}
+
+	void ClientApp::OnMessageSent(Core::MessageSentEvent& e)
+	{
+		INFO("Message sent: {0} bytes", e.GetMessage().GetSize());
+	}
+
+	void ClientApp::OnMessageAccepted(Core::MessageAcceptedEvent& e)
+	{
+		INFO("Message recieved: {0} bytes\n{1}", e.GetMessage().GetSize(), *e.GetMessage().Body.Content->GetDataAs<int>());
 	}
 
 	void ClientApp::Render()
@@ -66,7 +111,21 @@ namespace Client
 				ImGui::PopFont();
 
 				ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Log in").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
-				ImGui::Button("Log in");
+				if (ImGui::Button("Log in") && networkInterface->IsConnected())
+				{
+					Ref<Core::Message> message = new Core::Message();
+					message->Header.Size = 4;
+					message->Body.Content = CreateRef<Buffer>(4);
+					*message->Body.Content->GetDataAs<int>() = 32;
+
+					networkInterface->SendMessagePackets(message);
+
+					Ref<Core::Message> message2 = new Core::Message();
+					message2->Header.Size = 4;
+					message2->Body.Content = CreateRef<Buffer>(4);
+					*message2->Body.Content->GetDataAs<int>() = 64;
+					networkInterface->SendMessagePackets(message2);
+				}
 				ImGui::PopStyleVar();
 
 				ImGui::End();

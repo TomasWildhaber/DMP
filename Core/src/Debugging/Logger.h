@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <ctime>
+#include "Networking/Message.h"
 
 enum class Level
 {
@@ -319,6 +320,8 @@ private:
 			std::cout << any_cast<bool>(args[index]);
 		else if (args[index].type() == typeid(std::string))
 			std::cout << any_cast<std::string>(args[index]);
+		else if (args[index].type() == typeid(uint_least16_t))
+			std::cout << any_cast<uint_least16_t>(args[index]);
 		else
 			std::cout << "Argument at position: " << index << " not supported!" << std::endl;
 	}
