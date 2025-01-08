@@ -26,7 +26,7 @@ namespace Core
 
 	void AsioServerInterface::SendMessagePackets(Ref<Message>& message)
 	{
-		Ref<Session> session = FindSessionById(message->GetId());
+		Ref<Session> session = FindSessionById(message->GetSessionId());
 
 		if (session && session->IsOpen())
 			session->SendMessagePackets(message);

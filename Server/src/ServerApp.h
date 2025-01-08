@@ -3,6 +3,7 @@
 #include "Networking/NetworkServerInterface.h"
 #include "Networking/MessageQueue.h"
 #include "Networking/Session.h"
+#include "Database/DatabaseInterface.h"
 
 namespace Server
 {
@@ -24,5 +25,7 @@ namespace Server
 		Ref<Core::NetworkServerInterface> networkInterface;
 		std::deque<Ref<Core::Session>> sessions;
 		Core::MessageQueue messageQueue;
+
+		Ref<Core::DatabaseInterface> databaseInterface;
 	};
 }

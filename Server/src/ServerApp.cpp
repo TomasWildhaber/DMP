@@ -2,6 +2,8 @@
 #include "Core/EntryPoint.h"
 #include "Debugging/Log.h"
 #include "ServerApp.h"
+#include "Database/Command.h"
+#include "Database/Response.h"
 
 namespace Server
 {
@@ -10,6 +12,7 @@ namespace Server
 		SetLoggerTitle("Server");
 
 		networkInterface = Core::NetworkServerInterface::Create(20000, messageQueue, sessions);
+		databaseInterface = Core::DatabaseInterface::Create("144.24.166.190@DMP", "DMP", "Tester_123");
 	}
 
 	void ServerApp::OnEvent(Core::Event& e)
@@ -24,30 +27,22 @@ namespace Server
 
 	void ServerApp::OnClientConnected(Core::ConnectedEvent& e)
 	{
-		INFO("New Connection: {0} on port {1}", e.GetDomain(), e.GetPort());
+		TRACE("New Connection: {0} on port {1}", e.GetDomain(), e.GetPort());
 	}
 
 	void ServerApp::OnClientDisconnected(Core::DisconnectedEvent& e)
 	{
-		INFO("Client connection closed!");
+		TRACE("Client connection closed!");
 	}
 
 	void ServerApp::OnMessageSent(Core::MessageSentEvent& e)
 	{
-		INFO("Message sent: {0} bytes to {1}", e.GetMessage().GetSize(), e.GetMessage().GetId());
+		TRACE("Message sent: {0} bytes to {1}", e.GetMessage().GetSize(), e.GetMessage().GetSessionId());
 	}
 
 	void ServerApp::OnMessageAccepted(Core::MessageAcceptedEvent& e)
 	{
-		INFO("Message recieved: {0} bytes from {1}\n{2}", e.GetMessage().GetSize(), e.GetMessage().GetId(), *e.GetMessage().Body.Content->GetDataAs<int>());
-
-		Ref<Core::Message> message = new Core::Message();
-		message->Header.SessionId = 1;
-		message->Header.Size = 4;
-		message->Body.Content = CreateRef<Buffer>(4);
-		*message->Body.Content->GetDataAs<int>() = 32;
-
-		networkInterface->SendMessagePackets(message);
+		TRACE("Message recieved: {0} bytes from {1}", e.GetMessage().GetSize(), e.GetMessage().GetSessionId());
 	}
 
 	void ServerApp::ProcessMessageQueue()
@@ -58,6 +53,52 @@ namespace Server
 
 	void ServerApp::ProcessMessage()
 	{
+		Core::Message& message = messageQueue.Get();
+
+		if (message.GetType() == Core::MessageType::Command)
+		{
+			Core::Command& command = *message.Body.Content->GetDataAs<Core::Command>();
+
+			switch (command.GetType())
+			{
+				case Core::CommandType::Query:
+				{
+					databaseInterface->Query(command.GetCommandString());
+
+					Core::Response response(command.GetTaskId());
+					databaseInterface->FetchData(response);
+
+					Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
+					responseMessaage->Header.Type = Core::MessageType::Response;
+					responseMessaage->Header.SessionId = message.GetSessionId();
+					
+					response.Serialize(responseMessaage->Body.Content);
+					responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
+
+					networkInterface->SendMessagePackets(responseMessaage);
+
+					break;
+				}
+				case Core::CommandType::Command:
+				{
+					Core::Response response(command.GetTaskId());
+
+					response.AddData(new Core::DatabaseBool(databaseInterface->Execute(command.GetCommandString())));
+
+					Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
+					responseMessaage->Header.Type = Core::MessageType::Response;
+					responseMessaage->Header.SessionId = message.GetSessionId();
+
+					response.Serialize(responseMessaage->Body.Content);
+					responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
+
+					networkInterface->SendMessagePackets(responseMessaage);
+
+					break;
+				}
+			}
+		}
+
 		messageQueue.Pop();
 	}
 }

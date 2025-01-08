@@ -2,7 +2,7 @@ project "Server"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++20"
-	staticruntime "on"
+	staticruntime "off"
 
     targetdir (outputdir .. "$(Configuration)/$(ProjectName)")
 	objdir (intoutputdir .. "$(Configuration)/$(ProjectName)")

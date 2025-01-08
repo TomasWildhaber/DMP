@@ -29,7 +29,7 @@ namespace Core
 	public:
 		MessageAcceptedEvent(Message& _message) : message(_message) {}
 
-		inline const Message& GetMessage() const { return message; }
+		inline Message& GetMessage() const { return message; }
 
 		static EventType GetStaticEventType() { return EventType::MessageAccepted; }
 		EventType GetEventType() const override { return GetStaticEventType(); }

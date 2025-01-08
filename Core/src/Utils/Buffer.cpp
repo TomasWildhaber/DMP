@@ -27,3 +27,10 @@ void Buffer::WriteZeros()
 {
 	memset(data, 0, size);
 }
+
+void Buffer::Write(const void* Data, uint32_t Size)
+{
+	Allocate(Size);
+
+	memcpy(data, Data, Size);
+}

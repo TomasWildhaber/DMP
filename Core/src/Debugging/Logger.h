@@ -17,7 +17,7 @@ class Logger
 {
 	Logger() = delete;
 public:
-	static inline Level level = Level::Trace;
+	static inline Level level = Level::Error;
 	static inline const char* Title = "App";
 
 	template<typename... Args>

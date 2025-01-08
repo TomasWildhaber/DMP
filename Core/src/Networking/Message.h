@@ -8,6 +8,8 @@ namespace Core
 	{
 		Text = 0,
 		RawBytes,
+		Command,
+		Response,
 	};
 
 	struct MessageHeader
@@ -30,7 +32,8 @@ namespace Core
 	struct Message
 	{
 		inline const uint32_t GetSize() const { return sizeof(MessageHeader) + Header.Size; }
-		inline const uint32_t GetId() const { return Header.SessionId; }
+		inline const uint32_t GetSessionId() const { return Header.SessionId; }
+		inline const MessageType GetType() const { return Header.Type; }
 
 		MessageHeader Header;
 		MessageBody Body;
