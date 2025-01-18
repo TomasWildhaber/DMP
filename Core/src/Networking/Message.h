@@ -35,6 +35,14 @@ namespace Core
 		inline const uint32_t GetSessionId() const { return Header.SessionId; }
 		inline const MessageType GetType() const { return Header.Type; }
 
+		template<typename T>
+		void CreateBody(T& content)
+		{
+			Header.Size = sizeof(T);
+			Body.Content = CreateRef<Buffer>(sizeof(T));
+			*Body.Content->GetDataAs<T>() = content;
+		}
+
 		MessageHeader Header;
 		MessageBody Body;
 	};

@@ -83,7 +83,15 @@ namespace Server
 				{
 					Core::Response response(command.GetTaskId());
 
-					response.AddData(new Core::DatabaseBool(databaseInterface->Execute(command.GetCommandString())));
+					bool success = databaseInterface->Execute(command.GetCommandString());
+					response.AddData(new Core::DatabaseBool(success));
+
+					std::string commandString(command.GetCommandString());
+					if (success && commandString.starts_with("INSERT"));
+					{
+						databaseInterface->Query("SELECT LAST_INSERT_ID();");
+						databaseInterface->FetchData(response);
+					}
 
 					Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
 					responseMessaage->Header.Type = Core::MessageType::Response;

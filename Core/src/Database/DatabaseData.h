@@ -70,21 +70,6 @@ namespace Core
 		bool Value;
 	};
 
-	struct DatabaseEnum : public DatabaseData
-	{
-		DatabaseEnum() = default;
-		DatabaseEnum(uint32_t value) : Value(value) {}
-
-		static DatabaseDataType GetStaticType() { return DatabaseDataType::Enum; }
-		virtual inline const DatabaseDataType GetType() const override { return GetStaticType(); }
-		virtual void* GetValue() override { return &Value; }
-
-		void Serialize(std::ostream& os) override { os.write(reinterpret_cast<const char*>(&Value), sizeof(Value)); }
-		void Deserialize(std::istream& is) override { is.read(reinterpret_cast<char*>(&Value), sizeof(Value)); }
-
-		uint32_t Value;
-	};
-
 	struct DatabaseTimestamp : public DatabaseData
 	{
 		DatabaseTimestamp() = default;

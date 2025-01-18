@@ -2,6 +2,8 @@
 #include "Core/Application.h"
 #include "Networking/NetworkClientInterface.h"
 #include "Networking/MessageQueue.h"
+#include "User.h"
+#include "Database/Command.h"
 
 struct ImFont;
 
@@ -32,7 +34,6 @@ namespace Client
 
 	struct LoginData
 	{
-		uint32_t UserId = 0;
 		std::string Email;
 		std::string PasswordHash;
 		LoginErrorType Error = LoginErrorType::None;
@@ -61,13 +62,18 @@ namespace Client
 	private:
 		void SetStyle();
 
-		void SendLoginMessage();
-		void SendRegisterMessage();
-
 		void OnConnect(Core::ConnectedEvent& e);
 		void OnDisconnect(Core::DisconnectedEvent& e);
 		void OnMessageSent(Core::MessageSentEvent& e);
 		void OnMessageAccepted(Core::MessageAcceptedEvent& e);
+
+		// Sending methods
+		void SendLoginMessage();
+		void SendRegisterMessage();
+		void SendCommandMessage(Core::Command& command);
+
+		// Reading methods
+		void ReadUserTeams();
 
 		Ref<Core::NetworkClientInterface> networkInterface;
 		Core::MessageQueue messageQueue;
@@ -77,5 +83,6 @@ namespace Client
 
 		LoginData loginData;
 		RegisterData registerData;
+		User user;
 	};
 }

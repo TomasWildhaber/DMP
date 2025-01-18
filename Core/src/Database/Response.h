@@ -70,9 +70,6 @@ namespace Core
 				case DatabaseDataType::Bool:
 					item = new DatabaseBool();
 					break;
-				case DatabaseDataType::Enum:
-					item = new DatabaseEnum();
-					break;
 				case DatabaseDataType::Timestamp:
 					// item = new DatabaseTimestamp();
 					break;

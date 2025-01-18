@@ -71,9 +71,11 @@ namespace Core
 				switch (type)
 				{
 				case 5:
+				case 6: // int
 					response.AddData(new DatabaseInt(result->getInt(i + 1)));
 					break;
-				case 13:
+				case 13: // string
+				case 22: // enum
 					response.AddData(new DatabaseString(result->getString(i + 1).c_str()));
 					break;
 				}
