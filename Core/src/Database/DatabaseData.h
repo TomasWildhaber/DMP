@@ -45,6 +45,12 @@ namespace Core
 			String[sizeof(String) - 1] = '\0';
 		}
 
+		DatabaseString(std::string& string)
+		{
+			strncpy(String, string.c_str(), string.size() - 1);
+			String[string.size() - 1] = '\0';
+		}
+
 		static DatabaseDataType GetStaticType() { return DatabaseDataType::String; }
 		virtual inline const DatabaseDataType GetType() const override { return GetStaticType(); }
 		virtual void* GetValue() override { return &String; }

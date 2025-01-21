@@ -22,6 +22,8 @@ namespace Server
 		void ProcessMessageQueue();
 		void ProcessMessage();
 
+		void SendResponse(Core::Response& response);
+
 		Ref<Core::NetworkServerInterface> networkInterface;
 		std::deque<Ref<Core::Session>> sessions;
 		Core::MessageQueue messageQueue;

@@ -1,27 +1,16 @@
 #pragma once
-#include "DatabaseData.h"
-#include "Utils/Memory.h"
-#include "Utils/Buffer.h"
-
-#include "Debugging/Log.h"
+#include "CommandBase.h"
 
 namespace Core
 {
-	class Response
+	class Response : public CommandBase
 	{
 		friend class SQLInterface;
 	public:
 		Response() = default;
-		Response(uint32_t id) : taskId(id) {}
+		Response(uint32_t id) : CommandBase(id) {}
 
-		inline const uint32_t GetTaskId() const { return taskId; }
-		inline const uint32_t GetDataCount() const { return data.size(); }
-		inline bool HasData() const { return data.size() != 0; }
-		inline std::vector< Ref<DatabaseData>>& GetData() { return data; }
-
-		inline void AddData(Ref<DatabaseData> ref) { data.push_back(ref); }
-
-		void Serialize(Ref<Buffer>& buffer) const
+		void Serialize(Ref<Buffer>& buffer) const override
 		{
 			std::ostringstream os;
 
@@ -41,7 +30,7 @@ namespace Core
 			buffer->Write(os.str().data(), os.str().size());
 		}
 
-		void Deserialize(Ref<Buffer>& buffer)
+		void Deserialize(Ref<Buffer>& buffer) override
 		{
 			std::istringstream is(std::string(buffer->GetData(), buffer->GetSize()));
 
@@ -79,10 +68,5 @@ namespace Core
 				data.push_back(item);
 			}
 		}
-
-		inline DatabaseData& operator[] (const int index) { return data[index].Get(); }
-	private:
-		std::vector<Ref<DatabaseData>> data;
-		uint32_t taskId = 0;
 	};
 }

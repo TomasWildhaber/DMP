@@ -12,7 +12,7 @@ namespace Server
 		SetLoggerTitle("Server");
 
 		networkInterface = Core::NetworkServerInterface::Create(20000, messageQueue, sessions);
-		databaseInterface = Core::DatabaseInterface::Create("144.24.166.190@DMP", "DMP", "Tester_123");
+		databaseInterface = Core::DatabaseInterface::Create("tcp://127.0.0.1:3306", "dmp", "dmp", "Tester_123");
 	}
 
 	void ServerApp::OnEvent(Core::Event& e)
@@ -57,25 +57,19 @@ namespace Server
 
 		if (message.GetType() == Core::MessageType::Command)
 		{
-			Core::Command& command = *message.Body.Content->GetDataAs<Core::Command>();
+			Core::Command command;
+			command.Deserialize(message.Body.Content);
 
 			switch (command.GetType())
 			{
 				case Core::CommandType::Query:
 				{
-					databaseInterface->Query(command.GetCommandString());
+					databaseInterface->Query(command);
 
 					Core::Response response(command.GetTaskId());
 					databaseInterface->FetchData(response);
 
-					Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
-					responseMessaage->Header.Type = Core::MessageType::Response;
-					responseMessaage->Header.SessionId = message.GetSessionId();
-					
-					response.Serialize(responseMessaage->Body.Content);
-					responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
-
-					networkInterface->SendMessagePackets(responseMessaage);
+					SendResponse(response);
 
 					break;
 				}
@@ -83,24 +77,30 @@ namespace Server
 				{
 					Core::Response response(command.GetTaskId());
 
-					bool success = databaseInterface->Execute(command.GetCommandString());
+					bool success = databaseInterface->Execute(command);
 					response.AddData(new Core::DatabaseBool(success));
 
 					std::string commandString(command.GetCommandString());
-					if (success && commandString.starts_with("INSERT"));
+					if (success && (commandString.starts_with("INSERT") || commandString.starts_with("insert")));
 					{
-						databaseInterface->Query("SELECT LAST_INSERT_ID();");
+						Core::Command com;
+						com.SetCommandString("SELECT LAST_INSERT_ID();");
+						databaseInterface->Query(com);
 						databaseInterface->FetchData(response);
 					}
 
-					Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
-					responseMessaage->Header.Type = Core::MessageType::Response;
-					responseMessaage->Header.SessionId = message.GetSessionId();
+					SendResponse(response);
 
-					response.Serialize(responseMessaage->Body.Content);
-					responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
+					break;
+				}
+				case Core::CommandType::Update:
+				{
+					Core::Response response(command.GetTaskId());
 
-					networkInterface->SendMessagePackets(responseMessaage);
+					bool success = databaseInterface->Update(command);
+					response.AddData(new Core::DatabaseBool(success));
+
+					SendResponse(response);
 
 					break;
 				}
@@ -108,6 +108,20 @@ namespace Server
 		}
 
 		messageQueue.Pop();
+	}
+
+	void ServerApp::SendResponse(Core::Response& response)
+	{
+		Core::Message& message = messageQueue.Get();
+
+		Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
+		responseMessaage->Header.Type = Core::MessageType::Response;
+		responseMessaage->Header.SessionId = message.GetSessionId();
+
+		response.Serialize(responseMessaage->Body.Content);
+		responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
+
+		networkInterface->SendMessagePackets(responseMessaage);
 	}
 }
 

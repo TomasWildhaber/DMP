@@ -102,8 +102,9 @@ namespace Client
 						Core::Command command(5);
 						command.SetType(Core::CommandType::Command);
 
-						std::string query = "INSERT INTO users_teams (user_id, team_id) VALUES ('" + std::to_string(user.GetId()) + "', '" + std::to_string(id) + "');";
-						command.SetCommandString(query.c_str());
+						command.SetCommandString("INSERT INTO users_teams (user_id, team_id) VALUES (?, ?);");
+						command.AddData(new Core::DatabaseInt(user.GetId()));
+						command.AddData(new Core::DatabaseInt(id));
 
 						SendCommandMessage(command);
 					}
@@ -171,7 +172,7 @@ namespace Client
 	void ClientApp::Render()
 	{
 		ImGuiIO& io = ImGui::GetIO();
-		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
+		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize;
 
 		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
 		ImGui::SetNextWindowSize(io.DisplaySize);
@@ -376,8 +377,8 @@ namespace Client
 							Core::Command command(3);
 							command.SetType(Core::CommandType::Query);
 
-							std::string query = "SELECT email FROM users WHERE email ='" + registerData.Email + "';";
-							command.SetCommandString(query.c_str());
+							command.SetCommandString("SELECT email FROM users WHERE email = ?;");
+							command.AddData(new Core::DatabaseString(registerData.Email));
 
 							SendCommandMessage(command);
 
@@ -440,8 +441,9 @@ namespace Client
 							Core::Command command(4);
 							command.SetType(Core::CommandType::Command);
 
-							std::string query = "INSERT INTO teams (name, owner_id) VALUES ('" + std::string(teamNameBuffer) + "', '" + std::to_string(user.GetId()) + "');";
-							command.SetCommandString(query.c_str());
+							command.SetCommandString("INSERT INTO teams (name, owner_id) VALUES (?, ?);");
+							command.AddData(new Core::DatabaseString(teamNameBuffer));
+							command.AddData(new Core::DatabaseInt(user.GetId()));
 
 							SendCommandMessage(command);
 
@@ -522,12 +524,12 @@ namespace Client
 
 				ImGui::PushFont(fonts["Regular20"]);
 				ImGui::SetNextWindowBgAlpha(0.0f);
-				ImGui::BeginChild("Messages", ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight() - 120.0f));
+				ImGui::BeginChild("Messages", ImVec2(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2, ImGui::GetWindowHeight() - 150.0f), 0, ImGuiWindowFlags_NoScrollbar);
 
 				if (!user.GetSelectedTeam().HasMessages())
 				{
 					ImVec2 textSize = ImGui::CalcTextSize("There are no messages yet");
-					ImGui::SetCursorPos(ImVec2(ImGui::GetWindowSize().x / 2 - textSize.x / 2, ImGui::GetWindowSize().y / 2 - textSize.y / 2));
+					ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() / 2 - textSize.x / 2, ImGui::GetWindowHeight() / 2 - textSize.y / 2));
 					ImGui::TextColored(ImVec4(0.1f, 0.1f, 0.1f, 1.0f), "There are no messages yet");
 				}
 
@@ -537,14 +539,17 @@ namespace Client
 
 					if (message->GetAuthorName() == user.GetName())
 					{
-						ImGui::SetCursorPosX(ImGui::GetWindowWidth() / 2 + 50.0f);
-
 						ImGui::PushFont(fonts["Regular14"]);
-						ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 20.0f);
+
+						float nameWidth = std::clamp(ImGui::CalcTextSize(message->GetAuthorName().c_str()).x, 0.0f, ImGui::GetWindowWidth() / 2);
+						ImGui::SetCursorPosX(ImGui::GetContentRegionAvail().x - nameWidth);
+
+						ImGui::PushTextWrapPos(ImGui::GetWindowWidth());
 						ImGui::TextWrapped(message->GetAuthorName().c_str());
 						ImGui::PopFont();
 
-						ImGui::SetCursorPosX(ImGui::GetWindowWidth() / 2 + 50.0f);
+						float messageWidth = std::clamp(ImGui::CalcTextSize(message->GetContent().c_str()).x, 0.0f, ImGui::GetWindowWidth() / 2);
+						ImGui::SetCursorPosX(ImGui::GetContentRegionAvail().x - messageWidth);
 						ImGui::TextWrapped(message->GetContent().c_str());
 						ImGui::PopTextWrapPos();
 					}
@@ -563,7 +568,7 @@ namespace Client
 				ImGui::EndChild();
 
 				static char messageBuffer[256] = {};
-				ImGui::SetNextItemWidth(ImGui::GetWindowWidth() - 20.0f);
+				ImGui::SetNextItemWidth(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2);
 				ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 60.0f);
 				if (ImGui::InputText("##MessageInput", messageBuffer, sizeof(messageBuffer), ImGuiInputTextFlags_EnterReturnsTrue))
 				{
@@ -572,8 +577,10 @@ namespace Client
 
 					std::string message(messageBuffer);
 
-					std::string query = "INSERT INTO messages (content, team_id, author_id) VALUES ('" + std::string(messageBuffer) + "', " + std::to_string(user.GetSelectedTeam().GetId()) + ", " + std::to_string(user.GetId()) + ")";
-					command.SetCommandString(query.c_str());
+					command.SetCommandString("INSERT INTO messages (content, team_id, author_id) VALUES (?, ?, ?)");
+					command.AddData(new Core::DatabaseString(messageBuffer));
+					command.AddData(new Core::DatabaseInt(user.GetSelectedTeam().GetId()));
+					command.AddData(new Core::DatabaseInt(user.GetId()));
 
 					SendCommandMessage(command);
 
@@ -585,14 +592,12 @@ namespace Client
 				ImGui::PopFont();
 				ImGui::End();
 
-				ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelSize, io.DisplaySize.y));
+				ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelSize, 0.0f));
 				ImGui::SetNextWindowSize(ImVec2(rightSidePanelSize, io.DisplaySize.y));
+
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 				ImGui::Begin("RightSidePanel", nullptr, windowFlags);
 				
-				// fix window pos
-
-				ImGui::Text("kysdfas");
-
 				ImGui::BeginTabBar("TabBar");
 				if (ImGui::BeginTabItem("Assignments"))
 				{
@@ -606,6 +611,7 @@ namespace Client
 				ImGui::EndTabBar();
 
 				ImGui::End();
+				ImGui::PopStyleVar();
 
 				break;
 			}
@@ -664,8 +670,8 @@ namespace Client
 		Core::Command command(1);
 		command.SetType(Core::CommandType::Query);
 		
-		std::string query = "SELECT id, password, first_name, last_name, role FROM users WHERE email='" + loginData.Email + "';";
-		command.SetCommandString(query.c_str());
+		command.SetCommandString("SELECT id, password, first_name, last_name, role FROM users WHERE email=?;");
+		command.AddData(new Core::DatabaseString(loginData.Email.c_str()));
 
 		SendCommandMessage(command);
 	}
@@ -675,8 +681,11 @@ namespace Client
 		Core::Command command(2);
 		command.SetType(Core::CommandType::Command);
 
-		std::string query = "INSERT INTO users (first_name, last_name, email, password, role) VALUES ('" + registerData.FirstName + "', '" + registerData.LastName + "', '" + registerData.Email + "', '" + registerData.PasswordHash + "' , 'user');";
-		command.SetCommandString(query.c_str());
+		command.SetCommandString("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, 'user');");
+		command.AddData(new Core::DatabaseString(registerData.FirstName));
+		command.AddData(new Core::DatabaseString(registerData.LastName));
+		command.AddData(new Core::DatabaseString(registerData.Email));
+		command.AddData(new Core::DatabaseString(registerData.PasswordHash));
 
 		SendCommandMessage(command);
 	}
@@ -685,7 +694,8 @@ namespace Client
 	{
 		Ref<Core::Message> message = CreateRef<Core::Message>();
 		message->Header.Type = Core::MessageType::Command;
-		message->CreateBody<Core::Command>(command);
+		command.Serialize(message->Body.Content);
+		message->Header.Size = message->Body.Content->GetSize();
 
 		networkInterface->SendMessagePackets(message);
 	}
@@ -696,8 +706,8 @@ namespace Client
 		command.SetType(Core::CommandType::Query);
 
 		// TODO: select teams
-		std::string query = "SELECT teams.id, teams.name FROM users_teams JOIN teams ON users_teams.team_id = teams.id WHERE users_teams.user_id = " + std::to_string(user.GetId()) + "; ";
-		command.SetCommandString(query.c_str());
+		command.SetCommandString("SELECT teams.id, teams.name FROM users_teams JOIN teams ON users_teams.team_id = teams.id WHERE users_teams.user_id = ?;");
+		command.AddData(new Core::DatabaseInt(user.GetId()));
 
 		SendCommandMessage(command);
 	}
@@ -707,9 +717,8 @@ namespace Client
 		Core::Command command(8);
 		command.SetType(Core::CommandType::Query);
 
-		// TODO: select messages for selected team
-		std::string query = "SELECT messages.content, users.first_name, users.last_name FROM messages JOIN users ON messages.author_id = users.id JOIN teams ON messages.team_id = teams.id WHERE messages.team_id = " + std::to_string(user.GetSelectedTeam().GetId()) + " ORDER BY messages.created_at ASC LIMIT 15; ";
-		command.SetCommandString(query.c_str());
+		command.SetCommandString("SELECT messages.content, users.first_name, users.last_name FROM messages JOIN users ON messages.author_id = users.id JOIN teams ON messages.team_id = teams.id WHERE messages.team_id = ? ORDER BY messages.created_at ASC LIMIT 15;");
+		command.AddData(new Core::DatabaseInt(user.GetSelectedTeam().GetId()));
 
 		SendCommandMessage(command);
 	}

@@ -6,19 +6,18 @@
 
 namespace Core
 {
-	Ref<DatabaseInterface> DatabaseInterface::Create(const char* database, const char* username, const char* password)
+	Ref<DatabaseInterface> DatabaseInterface::Create(const char* address, const char* database, const char* username, const char* password)
 	{
-		return new SQLInterface(database, username, password);
+		return new SQLInterface(address, database, username, password);
 	}
 
-	SQLInterface::SQLInterface(const char* database, const char* username, const char* password)
+	SQLInterface::SQLInterface(const char* address, const char* database, const char* username, const char* password)
 	{
 		try
 		{
 			driver = get_driver_instance();
-			connection = driver->connect("tcp://127.0.0.1:3306", "dmp", "Tester_123");
-			connection->setSchema("dmp");
-			statement = connection->createStatement();
+			connection = driver->connect(address, username, password);
+			connection->setSchema(database);
 			INFO("Database connected!");
 		}
 		catch (const sql::SQLException& e)
@@ -28,11 +27,13 @@ namespace Core
 		}
 	}
 
-	bool SQLInterface::Execute(const char* query)
+	bool SQLInterface::Execute(Command& command)
 	{
 		try
 		{
-			statement->execute(query);
+			statement = connection->prepareStatement(command.GetCommandString());
+			loadValues(command);
+			statement->execute();
 			return true;
 		}
 		catch (const sql::SQLException& e)
@@ -42,16 +43,34 @@ namespace Core
 		}
 	}
 
-	bool SQLInterface::Query(const char* query)
+	bool SQLInterface::Query(Command& command)
 	{
 		try
 		{
-			result = statement->executeQuery(query);
+			statement = connection->prepareStatement(command.GetCommandString());
+			loadValues(command);
+			result = statement->executeQuery();
 			return true;
 		}
 		catch (const sql::SQLException& e)
 		{
 			ERROR("SQL query error: {0}", e.getSQLStateCStr());
+			return false;
+		}
+	}
+
+	bool SQLInterface::Update(Command& command)
+	{
+		try
+		{
+			statement = connection->prepareStatement(command.GetCommandString());
+			loadValues(command);
+			statement->executeUpdate();
+			return true;
+		}
+		catch (const sql::SQLException& e)
+		{
+			ERROR("SQL update error: {0}", e.getSQLStateCStr());
 			return false;
 		}
 	}
@@ -86,6 +105,28 @@ namespace Core
 			}
 
 			i++;
+		}
+	}
+
+	void SQLInterface::loadValues(Command& command)
+	{
+		for (uint32_t i = 0; i < command.GetDataCount(); i++)
+		{
+			switch (command[i].GetType())
+			{
+			case DatabaseDataType::Int:
+				statement->setInt(i + 1, *(int*)command[i].GetValue());
+				break;
+			case DatabaseDataType::String:
+				statement->setString(i + 1, (const char*)command[i].GetValue());
+				break;
+			case DatabaseDataType::Bool:
+				statement->setBoolean(i + 1, *(bool*)command[i].GetValue());
+				break;
+			case DatabaseDataType::Timestamp:
+				statement->setDateTime(i + 1, (const char*)command[i].GetValue());
+				break;
+			}
 		}
 	}
 }
