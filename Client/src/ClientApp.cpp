@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include <imgui.h>
 #include "ClientApp.h"
 #include "Core/EntryPoint.h"
@@ -112,7 +112,7 @@ namespace Client
 
 					break;
 				}
-				case 5:
+				case 5: // Update teams
 				{
 					ReadUserTeams();
 
@@ -122,13 +122,23 @@ namespace Client
 				{
 					user.ClearTeams();
 					for (uint32_t i = 0; i < response.GetDataCount(); i += 2)
-					{
-						Team team(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue());
-						user.AddTeam(team);
-					}
+						user.AddTeam(new Team(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue()));
 
 					if (user.HasTeams())
 						user.SetSelectedTeam(user.GetTeams()[0]);
+
+					ReadTeamMessages();
+
+					break;
+				}
+				case 8: // Process team messages
+				{
+					user.GetSelectedTeam().ClearMessages();
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 3)
+					{
+						std::string name = std::string((const char*)response[i + 1].GetValue()) + " " + (const char*)response[i + 2].GetValue();
+						user.GetSelectedTeam().AddMessage(new Message(name.c_str(), (const char*)response[i].GetValue()));
+					}
 
 					break;
 				}
@@ -161,6 +171,7 @@ namespace Client
 	void ClientApp::Render()
 	{
 		ImGuiIO& io = ImGui::GetIO();
+		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
 
 		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
 		ImGui::SetNextWindowSize(io.DisplaySize);
@@ -182,7 +193,7 @@ namespace Client
 				static char passwordBuffer[256];
 
 				ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-				ImGui::Begin("Login", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
+				ImGui::Begin("Login", nullptr, windowFlags);
 
 				ImGui::PushFont(fonts["Heading"]);
 				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Login").x) / 2);
@@ -277,7 +288,7 @@ namespace Client
 			case Client::ClientState::Register:
 			{
 				ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-				ImGui::Begin("Create account", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
+				ImGui::Begin("Create account", nullptr, windowFlags);
 
 				ImGui::PushFont(fonts["Heading"]);
 				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Create an account").x) / 2);
@@ -401,14 +412,15 @@ namespace Client
 			}
 			case Client::ClientState::Home:
 			{
-				static bool showTeam = false;
 				static bool openPopup = false;
+				static float leftSidePanelSize = 300.0f;
+				static float rightSidePanelSize = 300.0f;
 
 				ImGui::SetNextWindowSize(ImVec2(300.0f, 0.0f));
 				if (ImGui::IsPopupOpen("TeamCreation"))
 					ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
-				if (ImGui::BeginPopupModal("TeamCreation", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings))
+				if (ImGui::BeginPopupModal("TeamCreation", nullptr, windowFlags))
 				{
 					static char teamNameBuffer[256] = {};
 
@@ -446,8 +458,8 @@ namespace Client
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 
 				ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-				ImGui::SetNextWindowSize(ImVec2(300.0f, io.DisplaySize.y));
-				ImGui::Begin("SidePanel", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
+				ImGui::SetNextWindowSize(ImVec2(leftSidePanelSize, io.DisplaySize.y));
+				ImGui::Begin("LeftSidePanel", nullptr, windowFlags);
 				ImGui::PopStyleVar();
 
 				ImGui::BeginChild("Profile", ImVec2(ImGui::GetWindowSize().x, 40.0f));
@@ -457,7 +469,7 @@ namespace Client
 
 				ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 8.0f));
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 1.0f));
-				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 265.0f);
+				ImGui::SetCursorPosX(leftSidePanelSize - 35.0f);
 				if (ImGui::Button("+"))
 					openPopup = true;
 
@@ -466,13 +478,15 @@ namespace Client
 				ImGui::Indent(20.0f);
 				for (uint32_t i = 0; i < user.GetTeamCount(); i++)
 				{
-					Team& team = user.GetTeams()[i];
+					Ref<Team> team = user.GetTeams()[i];
 
-					if (ImGui::Selectable(team.GetName(), user.HasSelectedTeam() && team.GetId() == user.GetSelectedTeam().GetId(), ImGuiSelectableFlags_SpanAllColumns))
-						showTeam = true;
-
-					if (ImGui::IsItemClicked())
+					ImGui::PushID(i);
+					if (ImGui::Selectable(team->GetName(), user.HasSelectedTeam() && team->GetId() == user.GetSelectedTeam().GetId(), ImGuiSelectableFlags_SpanAllColumns))
+					{
 						user.SetSelectedTeam(team);
+						ReadTeamMessages();
+					}
+					ImGui::PopID();
 				}
 
 				ImGui::PopStyleVar();
@@ -481,11 +495,9 @@ namespace Client
 				if (!user.HasTeams())
 				{
 					ImGui::SetNextWindowBgAlpha(0.0f);
-					ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2 + 150.0f, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-					ImGui::Begin("NoTeamsInfo", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
-
+					ImGui::SetNextWindowPos(ImVec2((io.DisplaySize.x + leftSidePanelSize) / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+					ImGui::Begin("NoTeamsInfo", nullptr, windowFlags);
 					ImGui::TextColored(ImVec4(0.1f, 0.1f, 0.1f, 1.0f), "You have no teams yet");
-
 					ImGui::End();
 				}
 
@@ -494,6 +506,106 @@ namespace Client
 					ImGui::OpenPopup("TeamCreation");
 					openPopup = false;
 				}
+
+				if (!user.HasSelectedTeam())
+					break;
+
+				ImGui::SetNextWindowBgAlpha(0.0f);
+				ImGui::SetNextWindowPos(ImVec2(leftSidePanelSize, 0.0f));
+				ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelSize - rightSidePanelSize, io.DisplaySize.y));
+				ImGui::Begin("MessageWindow", nullptr, windowFlags);
+
+				ImGui::PushFont(fonts["Heading"]);
+				ImGui::Text(user.GetSelectedTeam().GetName());
+				ImGui::Separator();
+				ImGui::PopFont();
+
+				ImGui::PushFont(fonts["Regular20"]);
+				ImGui::SetNextWindowBgAlpha(0.0f);
+				ImGui::BeginChild("Messages", ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight() - 120.0f));
+
+				if (!user.GetSelectedTeam().HasMessages())
+				{
+					ImVec2 textSize = ImGui::CalcTextSize("There are no messages yet");
+					ImGui::SetCursorPos(ImVec2(ImGui::GetWindowSize().x / 2 - textSize.x / 2, ImGui::GetWindowSize().y / 2 - textSize.y / 2));
+					ImGui::TextColored(ImVec4(0.1f, 0.1f, 0.1f, 1.0f), "There are no messages yet");
+				}
+
+				for (uint32_t i = 0; i < user.GetSelectedTeam().GetMessageCount(); i++)
+				{
+					Ref<Message> message = user.GetSelectedTeam().GetMessages()[i];
+
+					if (message->GetAuthorName() == user.GetName())
+					{
+						ImGui::SetCursorPosX(ImGui::GetWindowWidth() / 2 + 50.0f);
+
+						ImGui::PushFont(fonts["Regular14"]);
+						ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 20.0f);
+						ImGui::TextWrapped(message->GetAuthorName().c_str());
+						ImGui::PopFont();
+
+						ImGui::SetCursorPosX(ImGui::GetWindowWidth() / 2 + 50.0f);
+						ImGui::TextWrapped(message->GetContent().c_str());
+						ImGui::PopTextWrapPos();
+					}
+					else
+					{
+						ImGui::PushFont(fonts["Regular14"]);
+						ImGui::PushTextWrapPos(ImGui::GetWindowWidth() / 2);
+						ImGui::TextWrapped(message->GetAuthorName().c_str());
+						ImGui::PopFont();
+
+						ImGui::TextWrapped(message->GetContent().c_str());
+						ImGui::PopTextWrapPos();
+					}
+				}
+
+				ImGui::EndChild();
+
+				static char messageBuffer[256] = {};
+				ImGui::SetNextItemWidth(ImGui::GetWindowWidth() - 20.0f);
+				ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 60.0f);
+				if (ImGui::InputText("##MessageInput", messageBuffer, sizeof(messageBuffer), ImGuiInputTextFlags_EnterReturnsTrue))
+				{
+					Core::Command command(7);
+					command.SetType(Core::CommandType::Command);
+
+					std::string message(messageBuffer);
+
+					std::string query = "INSERT INTO messages (content, team_id, author_id) VALUES ('" + std::string(messageBuffer) + "', " + std::to_string(user.GetSelectedTeam().GetId()) + ", " + std::to_string(user.GetId()) + ")";
+					command.SetCommandString(query.c_str());
+
+					SendCommandMessage(command);
+
+					memset(messageBuffer, 0, sizeof(messageBuffer));
+
+					ReadTeamMessages();
+				}
+
+				ImGui::PopFont();
+				ImGui::End();
+
+				ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelSize, io.DisplaySize.y));
+				ImGui::SetNextWindowSize(ImVec2(rightSidePanelSize, io.DisplaySize.y));
+				ImGui::Begin("RightSidePanel", nullptr, windowFlags);
+				
+				// fix window pos
+
+				ImGui::Text("kysdfas");
+
+				ImGui::BeginTabBar("TabBar");
+				if (ImGui::BeginTabItem("Assignments"))
+				{
+					ImGui::EndTabItem();
+				}
+
+				if (ImGui::BeginTabItem("Members"))
+				{
+					ImGui::EndTabItem();
+				}
+				ImGui::EndTabBar();
+
+				ImGui::End();
 
 				break;
 			}
@@ -507,7 +619,7 @@ namespace Client
 		
 		ImVector<ImWchar> ranges;
 		ImFontGlyphRangesBuilder builder;
-		builder.AddText((const char*)u8"᚝�����������");
+		builder.AddText((const char*)u8"ášťřňčěžýíéóďúůäëïüöÁŠŤŘŇČĚŽÝÍÉÓĎŮÄËÏÖÜ");
 		builder.AddRanges(io.Fonts->GetGlyphRangesCyrillic());
 		builder.BuildRanges(&ranges);
 
@@ -516,6 +628,8 @@ namespace Client
 		io.FontDefault = io.Fonts->AddFontFromMemoryTTF((void*)&robotoMediumFontData, sizeof(robotoMediumFontData), 20.0f, &fontConfig, ranges.Data);
 		fonts["Heading"] = io.Fonts->AddFontFromMemoryTTF((void*)&robotoMediumFontData, sizeof(robotoMediumFontData), 38.0f, &fontConfig, ranges.Data);
 		fonts["Regular"] = io.Fonts->AddFontFromMemoryTTF((void*)&robotoThinFontData, sizeof(robotoThinFontData), 16.0f, &fontConfig, ranges.Data);
+		fonts["Regular20"] = io.Fonts->AddFontFromMemoryTTF((void*)&robotoThinFontData, sizeof(robotoThinFontData), 20.0f, &fontConfig, ranges.Data);
+		fonts["Regular14"] = io.Fonts->AddFontFromMemoryTTF((void*)&robotoThinFontData, sizeof(robotoThinFontData), 14.0f, &fontConfig, ranges.Data);
 		fonts["Error"] = io.Fonts->AddFontFromMemoryTTF((void*)&robotoThinFontData, sizeof(robotoThinFontData), 18.0f, &fontConfig, ranges.Data);
 		io.Fonts->Build();
 
@@ -542,6 +656,7 @@ namespace Client
 		style.Colors[ImGuiCol_Header] = style.Colors[ImGuiCol_Button];
 		style.Colors[ImGuiCol_HeaderHovered] = style.Colors[ImGuiCol_ButtonHovered];
 		style.Colors[ImGuiCol_HeaderActive] = style.Colors[ImGuiCol_ButtonActive];
+		style.Colors[ImGuiCol_Separator] = style.Colors[ImGuiCol_WindowBg];
 	}
 
 	void ClientApp::SendLoginMessage()
@@ -582,6 +697,18 @@ namespace Client
 
 		// TODO: select teams
 		std::string query = "SELECT teams.id, teams.name FROM users_teams JOIN teams ON users_teams.team_id = teams.id WHERE users_teams.user_id = " + std::to_string(user.GetId()) + "; ";
+		command.SetCommandString(query.c_str());
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::ReadTeamMessages()
+	{
+		Core::Command command(8);
+		command.SetType(Core::CommandType::Query);
+
+		// TODO: select messages for selected team
+		std::string query = "SELECT messages.content, users.first_name, users.last_name FROM messages JOIN users ON messages.author_id = users.id JOIN teams ON messages.team_id = teams.id WHERE messages.team_id = " + std::to_string(user.GetSelectedTeam().GetId()) + " ORDER BY messages.created_at ASC LIMIT 15; ";
 		command.SetCommandString(query.c_str());
 
 		SendCommandMessage(command);

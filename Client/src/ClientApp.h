@@ -74,6 +74,7 @@ namespace Client
 
 		// Reading methods
 		void ReadUserTeams();
+		void ReadTeamMessages();
 
 		Ref<Core::NetworkClientInterface> networkInterface;
 		Core::MessageQueue messageQueue;

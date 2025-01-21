@@ -75,8 +75,12 @@ namespace Core
 					response.AddData(new DatabaseInt(result->getInt(i + 1)));
 					break;
 				case 13: // string
+				case 15: // text
 				case 22: // enum
 					response.AddData(new DatabaseString(result->getString(i + 1).c_str()));
+					break;
+				default:
+					ERROR("Unknown SQL data type {0}!", type);
 					break;
 				}
 			}
