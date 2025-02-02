@@ -23,6 +23,7 @@ namespace Client
 		None = 0,
 		NotFilled, /// Not filled inputs
 		NotMatching, // Not matching passwords
+		WrongFormat, // Email is in wrong format
 		Existing, // Existing email
 	};
 
@@ -72,7 +73,7 @@ namespace Client
 	// Class for client inherited from Core::Application class - return instance of it to Core::CreateApplication
 	class ClientApp : public Core::Application
 	{
-		// Map fonts to names for easy access
+		// Alias to map fonts to names for easy access
 		using FontMap = std::unordered_map<const char*, ImFont*>;
 	public:
 		ClientApp(const Core::ApplicationSpecifications& specs);
@@ -82,8 +83,12 @@ namespace Client
 		void ProcessMessage();
 	private:
 		// UI functions
-		void Render();
 		void SetStyle();
+		void Render();
+
+		void RenderLoginWindow(ImGuiWindowFlags flags);
+		void RenderRegisterWindow(ImGuiWindowFlags flags);
+		void RenderHomeWindow(ImGuiWindowFlags flags);
 
 		// Event functions
 		void OnConnect(Core::ConnectedEvent& e);
@@ -92,29 +97,33 @@ namespace Client
 		void OnMessageAccepted(Core::MessageAcceptedEvent& e);
 
 		// Sending methods
+		void SendCommandMessage(Core::Command& command);
 		void SendLoginMessage();
 		void SendRegisterMessage();
-		void SendCommandMessage(Core::Command& command);
 
 		// Reading methods
-		void ReadUserTeams();
-		void ReadTeamMessages();
-		void ReadTeamUsers();
+		void ReadUsersTeams();
+		void ReadSelectedTeamMessages();
+		void ReadSelectedTeamUsers();
 
 		// Modifying methods
-		void DeleteTeam(Team& team);
-		void RenameTeam(Team& team, const char* teamName);
+		void DeleteSelectedTeam();
+		void RenameSelectedTeam(const char* teamName);
 
-		void ValidateUserSelection(Ref<Team> firstTeam);
-
+		// Networking
 		Ref<Core::NetworkClientInterface> networkInterface;
 		Core::MessageQueue messageQueue;
 
+		// Map for saving fonts
 		FontMap fonts;
+
+		// Enum for rendering ui windows by the state of application
 		ClientState state = ClientState::None;
 
+		User loggedUser;
+
+		// For saving data from login and register forms
 		LoginData loginData;
 		RegisterData registerData;
-		User user;
 	};
 }

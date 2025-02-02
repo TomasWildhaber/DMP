@@ -22,6 +22,7 @@
 
 #include <mutex>
 
+#include <regex>
 #include <ctime>
 #include <any>
 
