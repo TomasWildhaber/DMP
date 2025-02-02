@@ -34,6 +34,15 @@ namespace Core
 			sessions.erase(std::remove(sessions.begin(), sessions.end(), session), sessions.end());
 	}
 
+	void AsioServerInterface::SendMessagePacketsToAllClients(Ref<Message>& message)
+	{
+		for (Ref<Session> session : sessions)
+		{
+			if (session && session->IsOpen())
+				session->SendMessagePackets(message);
+		}
+	}
+
 	Ref<Session> AsioServerInterface::FindSessionById(uint32_t SessionId)
 	{
 		auto session = std::find_if(sessions.begin(), sessions.end(), [&](Ref<Session> session) {

@@ -1,26 +1,29 @@
 #pragma once
 
+// Precompiled headers for Server
+
+// Basic usage
 #include <iostream>
 #include <memory>
 #include <utility>
 #include <algorithm>
 #include <functional>
-#include <random>
-#include <xhash>
+
+// Data structers
 #include <deque>
-
-#include <mutex>
-
 #include <string>
 #include <sstream>
-#include <array>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
 
+// Others
 #include <fstream>
+
+#include <mutex>
 
 #include <ctime>
 #include <any>
 
+// Data types typedefs
 #include <cstdint>

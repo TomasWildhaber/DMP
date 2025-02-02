@@ -75,32 +75,48 @@ namespace Server
 				}
 				case Core::CommandType::Command:
 				{
-					Core::Response response(command.GetTaskId());
-
 					bool success = databaseInterface->Execute(command);
-					response.AddData(new Core::DatabaseBool(success));
 
-					std::string commandString(command.GetCommandString());
-					if (success && (commandString.starts_with("INSERT") || commandString.starts_with("insert")));
+					std::istringstream commandString(command.GetCommandString());
+					if (command.GetTaskId())
 					{
-						Core::Command com;
-						com.SetCommandString("SELECT LAST_INSERT_ID();");
-						databaseInterface->Query(com);
-						databaseInterface->FetchData(response);
-					}
+						Core::Response response(command.GetTaskId());
+						response.AddData(new Core::DatabaseBool(success));
 
-					SendResponse(response);
+						if (success && (commandString.str().starts_with("INSERT") || commandString.str().starts_with("insert")));
+						{
+							Core::Command com;
+							com.SetCommandString("SELECT LAST_INSERT_ID();");
+							databaseInterface->Query(com);
+							databaseInterface->FetchData(response);
+						}
+						SendResponse(response);
+					}
+					
+					std::string tableName;
+					for (uint32_t i = 0; i < 3; i++) // filter 3rd word (INSERT INTO table)
+						commandString >> tableName;
+					SendUpdateResponse(tableName);
 
 					break;
 				}
 				case Core::CommandType::Update:
 				{
-					Core::Response response(command.GetTaskId());
-
 					bool success = databaseInterface->Update(command);
-					response.AddData(new Core::DatabaseBool(success));
 
-					SendResponse(response);
+					if (command.GetTaskId())
+					{
+						Core::Response response(command.GetTaskId());
+						response.AddData(new Core::DatabaseBool(success));
+
+						SendResponse(response);
+					}
+					
+					std::istringstream commandString(command.GetCommandString());
+					std::string tableName;
+					for (uint32_t i = 0; i < 2; i++) // filter 2nd word (UPDATE table)
+						commandString >> tableName;
+					SendUpdateResponse(tableName);
 
 					break;
 				}
@@ -122,6 +138,38 @@ namespace Server
 		responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
 
 		networkInterface->SendMessagePackets(responseMessaage);
+	}
+
+	void ServerApp::SendResponseToAllClients(Core::Response& response)
+	{
+		Core::Message& message = messageQueue.Get();
+
+		Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
+		responseMessaage->Header.Type = Core::MessageType::Response;
+
+		response.Serialize(responseMessaage->Body.Content);
+		responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
+
+		networkInterface->SendMessagePacketsToAllClients(responseMessaage);
+	}
+
+	void ServerApp::SendUpdateResponse(std::string& tableName)
+	{
+		if (tableName == "messages")
+		{
+			Core::Response response(6);
+			SendResponseToAllClients(response);
+		}
+		else if (tableName == "users")
+		{
+			Core::Response response(7);
+			SendResponseToAllClients(response);
+		}
+		else if (tableName == "teams")
+		{
+			Core::Response response(5);
+			SendResponseToAllClients(response);
+		}
 	}
 }
 

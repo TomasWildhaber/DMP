@@ -23,6 +23,8 @@ namespace Server
 		void ProcessMessage();
 
 		void SendResponse(Core::Response& response);
+		void SendResponseToAllClients(Core::Response& response);
+		void SendUpdateResponse(std::string& tableName);
 
 		Ref<Core::NetworkServerInterface> networkInterface;
 		std::deque<Ref<Core::Session>> sessions;

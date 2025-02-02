@@ -46,9 +46,9 @@ namespace Client
 			Core::Response response;
 			response.Deserialize(message.Body.Content);
 
-			switch (response.GetTaskId())
+			switch ((MessageResponses)response.GetTaskId())
 			{
-				case 1: // Login
+				case MessageResponses::Login: // Login
 				{
 					if (response.HasData() && std::string((const char*)response[1].GetValue()) == loginData.PasswordHash)
 					{
@@ -71,7 +71,7 @@ namespace Client
 					loginData.PasswordHash.clear();
 					break;
 				}
-				case 2: // Register
+				case MessageResponses::Register: // Register
 				{
 					if (*(bool*)response[0].GetValue())
 					{
@@ -84,7 +84,7 @@ namespace Client
 					registerData.PasswordHash.clear();
 					break;
 				}
-				case 3: // Check email
+				case MessageResponses::CheckEmail: // Check email
 				{
 					if (!response.HasData())
 						SendRegisterMessage();
@@ -93,13 +93,13 @@ namespace Client
 
 					break;
 				}
-				case 4: // Create user_teams relationship
+				case MessageResponses::LinkTeamToUser: // Create user_teams relationship
 				{
 					if (*(bool*)response[0].GetValue())
 					{
 						int id = *(int*)response[1].GetValue();
 						
-						Core::Command command(5);
+						Core::Command command((uint32_t)MessageResponses::None);
 						command.SetType(Core::CommandType::Command);
 
 						command.SetCommandString("INSERT INTO users_teams (user_id, team_id) VALUES (?, ?);");
@@ -113,32 +113,84 @@ namespace Client
 
 					break;
 				}
-				case 5: // Update teams
+				case MessageResponses::UpdateTeams: // Update teams
 				{
 					ReadUserTeams();
 
 					break;
 				}
-				case 6: // Process teams
+				case MessageResponses::UpdateMessages: // Update messages
 				{
-					user.ClearTeams();
-					for (uint32_t i = 0; i < response.GetDataCount(); i += 2)
-						user.AddTeam(new Team(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue()));
-
-					if (user.HasTeams())
-						user.SetSelectedTeam(user.GetTeams()[0]);
-
-					ReadTeamMessages();
+					if (user.HasSelectedTeam())
+						ReadTeamMessages();
 
 					break;
 				}
-				case 8: // Process team messages
+				case MessageResponses::UpdateUsers: // Update users
+				{
+					if (user.HasSelectedTeam())
+						ReadTeamUsers();
+
+					break;
+				}
+				case MessageResponses::ProcessTeams: // Process teams
+				{
+					user.ClearTeams();
+
+					Ref<Team> firstTeam;
+					// Load teams
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id , owner_id, name
+					{
+						// Store first team refence
+						if (i != 0)
+							user.AddTeam(new Team(*(int*)response[i].GetValue(), *(int*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue())); // Add a team to team vector
+						else
+							firstTeam = user.AddTeam(new Team(*(int*)response[i].GetValue(), *(int*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue())); // Add a team to team vector and store it's reference
+					}
+
+					if (!user.IsSelectedTeamValid())
+					{
+						if (firstTeam)
+							user.SetSelectedTeam(firstTeam);
+						else
+							user.UnselectTeam();
+					}
+
+					// Read team messages and users if team is selected
+					if (user.HasSelectedTeam())
+					{
+						ReadTeamMessages();
+						ReadTeamUsers();
+					}
+
+					break;
+				}
+				case MessageResponses::ProcessTeamMessages: // Process team messages
 				{
 					user.GetSelectedTeam().ClearMessages();
-					for (uint32_t i = 0; i < response.GetDataCount(); i += 3)
+
+					// Load messages
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 4) // Response: id, content, first name, last name 
 					{
+						// Construct full name
+						std::string name = std::string((const char*)response[i + 2].GetValue()) + " " + (const char*)response[i + 3].GetValue();
+						// Add message
+						user.GetSelectedTeam().AddMessage(new Message(name.c_str(), (const char*)response[i + 1].GetValue()));
+					}
+
+					break;
+				}
+				case MessageResponses::ProcessTeamUsers:
+				{
+					user.GetSelectedTeam().ClearUsers();
+
+					// Load team users
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id, first name, last name 
+					{
+						// Construct full name
 						std::string name = std::string((const char*)response[i + 1].GetValue()) + " " + (const char*)response[i + 2].GetValue();
-						user.GetSelectedTeam().AddMessage(new Message(name.c_str(), (const char*)response[i].GetValue()));
+						// Add user
+						user.GetSelectedTeam().AddUser(new User(*(int*)response[i].GetValue(), name));
 					}
 
 					break;
@@ -172,7 +224,10 @@ namespace Client
 	void ClientApp::Render()
 	{
 		ImGuiIO& io = ImGui::GetIO();
-		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize;
+		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
+		ImVec4 errorColor(0.845098039f, 0.0f, 0.0f, 1.0f);
+		ImVec4 redButtonColor(0.5803921568627451f, 0.0f, 0.0f, 1.0f);
+		ImVec4 redButtonActiveColor(0.4803921568627451f, 0.0f, 0.0f, 1.0f);
 
 		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
 		ImGui::SetNextWindowSize(io.DisplaySize);
@@ -211,11 +266,11 @@ namespace Client
 				{
 				case Client::LoginErrorType::NotFilled:
 					ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("All inputs must be filled!").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
-					ImGui::TextColored(ImVec4(0.845098039f, 0.0f, 0.0f, 1.0f), "All inputs must be filled!");
+					ImGui::TextColored(errorColor, "All inputs must be filled!");
 					break;
 				case Client::LoginErrorType::Incorrect:
 					ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Email or password is incorrect!").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
-					ImGui::TextColored(ImVec4(0.845098039f, 0.0f, 0.0f, 1.0f), "Email or password is incorrect!");
+					ImGui::TextColored(errorColor, "Email or password is incorrect!");
 					break;
 				}
 
@@ -306,15 +361,15 @@ namespace Client
 				{
 				case RegisterErrorType::NotFilled:
 					ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("All inputs must be filled!").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
-					ImGui::TextColored(ImVec4(0.845098039f, 0.0f, 0.0f, 1.0f), "All inputs must be filled!");
+					ImGui::TextColored(errorColor, "All inputs must be filled!");
 					break;
 				case RegisterErrorType::NotMatching:
 					ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Passwords does not match!").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
-					ImGui::TextColored(ImVec4(0.845098039f, 0.0f, 0.0f, 1.0f), "Passwords does not match!");
+					ImGui::TextColored(errorColor, "Passwords does not match!");
 					break;
 				case RegisterErrorType::Existing:
 					ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Email already taken!").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
-					ImGui::TextColored(ImVec4(0.845098039f, 0.0f, 0.0f, 1.0f), "Email already taken!");
+					ImGui::TextColored(errorColor, "Email already taken!");
 					break;
 				}
 
@@ -374,7 +429,7 @@ namespace Client
 							registerData.Email = emailBuffer;
 							registerData.PasswordHash = passwordBuffer;
 
-							Core::Command command(3);
+							Core::Command command((uint32_t)MessageResponses::CheckEmail);
 							command.SetType(Core::CommandType::Query);
 
 							command.SetCommandString("SELECT email FROM users WHERE email = ?;");
@@ -413,17 +468,42 @@ namespace Client
 			}
 			case Client::ClientState::Home:
 			{
-				static bool openPopup = false;
-				static float leftSidePanelSize = 300.0f;
-				static float rightSidePanelSize = 300.0f;
+				// Bools for rendering popups and user page
+				static bool openCreationPopup = false; // Popup for creating team after clicking on + button
+				static bool openRenamePopup = false; // Popup for renaming team after clicking on Rename button
+				static bool showUserPage = false;
+				// Bool for automatic messages scroll
+				static bool scrollDown = true;
 
-				ImGui::SetNextWindowSize(ImVec2(300.0f, 0.0f));
+				// Bool for deleting team - needs to be done at the end of frame
+				static bool deleteTeam = false;
+
+				// Widths of side panels
+				static float leftSidePanelWidth = 300.0f;
+				static float rightSidePanelWidth = 400.0f;
+
+				// Open creation popup
+				if (openCreationPopup)
+				{
+					ImGui::OpenPopup("TeamCreation");
+					openCreationPopup = false;
+				}
+
+				// Open rename popup
+				if (openRenamePopup)
+				{
+					ImGui::OpenPopup("TeamRename");
+					openRenamePopup = false;
+				}
+
+				// Center creation popup if is open
 				if (ImGui::IsPopupOpen("TeamCreation"))
 					ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
+				// Render creation popup
 				if (ImGui::BeginPopupModal("TeamCreation", nullptr, windowFlags))
 				{
-					static char teamNameBuffer[256] = {};
+					static char teamNameBuffer[26] = {}; // Limit team name to 25 characters
 
 					ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Create Team").x) / 2);
 					ImGui::Text("Create Team");
@@ -433,12 +513,22 @@ namespace Client
 					ImGui::SetNextItemWidth(260.0f);
 					ImGui::InputText("##TeamName", teamNameBuffer, sizeof(teamNameBuffer));
 
-					ImGui::SetCursorPos(ImVec2((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2, ImGui::GetCursorPosY() + 10.0f));
+					// Center buttons x position
+					float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2;
+					ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+					if (ImGui::Button("Cancel"))
+					{
+						memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+						ImGui::CloseCurrentPopup();
+					}
+
+					ImGui::SameLine();
 					if (ImGui::Button("Create"))
 					{
 						if (!std::string(teamNameBuffer).empty())
 						{
-							Core::Command command(4);
+							Core::Command command((uint32_t)MessageResponses::LinkTeamToUser);
 							command.SetType(Core::CommandType::Command);
 
 							command.SetCommandString("INSERT INTO teams (name, owner_id) VALUES (?, ?);");
@@ -448,9 +538,49 @@ namespace Client
 							SendCommandMessage(command);
 
 							memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+							ImGui::CloseCurrentPopup();
 						}
+					}
 
+					ImGui::EndPopup();
+				}
+
+				// Center rename popup if is open
+				if (ImGui::IsPopupOpen("TeamRename"))
+					ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+				// Render rename popup
+				if (ImGui::BeginPopupModal("TeamRename", nullptr, windowFlags))
+				{
+					static char teamNameBuffer[26] = {}; // Limit team name to 25 characters
+
+					ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Rename Team").x) / 2);
+					ImGui::Text("Rename Team");
+
+					ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 20.0f);
+					ImGui::Text("Name");
+					ImGui::SetNextItemWidth(260.0f);
+					ImGui::InputText("##TeamName", teamNameBuffer, sizeof(teamNameBuffer));
+
+					// Center buttons x position
+					float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2;
+					ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+					if (ImGui::Button("Cancel"))
+					{
+						memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
 						ImGui::CloseCurrentPopup();
+					}
+
+					ImGui::SameLine();
+					if (ImGui::Button("Rename"))
+					{
+						if (!std::string(teamNameBuffer).empty())
+						{
+							RenameTeam(user.GetSelectedTeam(), teamNameBuffer);
+							memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+							ImGui::CloseCurrentPopup();
+						}
 					}
 
 					ImGui::EndPopup();
@@ -460,33 +590,41 @@ namespace Client
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 
 				ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-				ImGui::SetNextWindowSize(ImVec2(leftSidePanelSize, io.DisplaySize.y));
+				ImGui::SetNextWindowSize(ImVec2(leftSidePanelWidth, io.DisplaySize.y));
 				ImGui::Begin("LeftSidePanel", nullptr, windowFlags);
 				ImGui::PopStyleVar();
 
-				ImGui::BeginChild("Profile", ImVec2(ImGui::GetWindowSize().x, 40.0f));
+				ImGui::BeginChild("Username", ImVec2(ImGui::GetWindowSize().x, 40.0f));
 				ImGui::SetCursorPos(ImVec2(10.0f, 9.0f));
 				ImGui::Text(user.GetName());
+
+				if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered())
+				{
+					user.UnselectTeam();
+					showUserPage = true;
+				}
+
 				ImGui::EndChild();
 
 				ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 8.0f));
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 1.0f));
-				ImGui::SetCursorPosX(leftSidePanelSize - 35.0f);
+				ImGui::SetCursorPosX(leftSidePanelWidth - 35.0f);
 				if (ImGui::Button("+"))
-					openPopup = true;
+					openCreationPopup = true;
 
 				ImGui::PopStyleVar(2);
 				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10.0f);
 				ImGui::Indent(20.0f);
-				for (uint32_t i = 0; i < user.GetTeamCount(); i++)
+				for (auto& [id, team] : user.GetTeams())
 				{
-					Ref<Team> team = user.GetTeams()[i];
-
-					ImGui::PushID(i);
+					ImGui::PushID(id);
 					if (ImGui::Selectable(team->GetName(), user.HasSelectedTeam() && team->GetId() == user.GetSelectedTeam().GetId(), ImGuiSelectableFlags_SpanAllColumns))
 					{
+						showUserPage = false;
+						scrollDown = true;
 						user.SetSelectedTeam(team);
 						ReadTeamMessages();
+						ReadTeamUsers();
 					}
 					ImGui::PopID();
 				}
@@ -494,37 +632,82 @@ namespace Client
 				ImGui::PopStyleVar();
 				ImGui::End();
 
-				if (!user.HasTeams())
+				if (!user.HasTeams() && !showUserPage)
 				{
 					ImGui::SetNextWindowBgAlpha(0.0f);
-					ImGui::SetNextWindowPos(ImVec2((io.DisplaySize.x + leftSidePanelSize) / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+					ImGui::SetNextWindowPos(ImVec2((io.DisplaySize.x + leftSidePanelWidth) / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 					ImGui::Begin("NoTeamsInfo", nullptr, windowFlags);
 					ImGui::TextColored(ImVec4(0.1f, 0.1f, 0.1f, 1.0f), "You have no teams yet");
 					ImGui::End();
 				}
 
-				if (openPopup)
+				if (showUserPage)
 				{
-					ImGui::OpenPopup("TeamCreation");
-					openPopup = false;
+					ImGui::SetNextWindowBgAlpha(0.0f);
+					ImGui::SetNextWindowPos(ImVec2(leftSidePanelWidth, 0.0f));
+					ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelWidth, io.DisplaySize.y));
+					ImGui::Begin("UserPageWindow", nullptr, windowFlags);
+
+					ImGui::SetNextWindowBgAlpha(0.0f);
+					ImGui::BeginChild("UserPageTabs", ImVec2(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2 - rightSidePanelWidth, ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y * 2));
+
+					ImGui::BeginTabBar("UserPageTabBar");
+					if (ImGui::BeginTabItem("Notifications"))
+					{
+						ImGui::EndTabItem();
+					}
+
+					if (ImGui::BeginTabItem("Invites"))
+					{
+						ImGui::EndTabItem();
+					}
+					ImGui::EndTabBar();
+
+					ImGui::EndChild();
+
+					ImGui::SameLine();
+					ImGui::Text("Change username");
+					ImGui::End();
 				}
 
+				// Return if user has no selected team
 				if (!user.HasSelectedTeam())
 					break;
 
+				// Render messages
 				ImGui::SetNextWindowBgAlpha(0.0f);
-				ImGui::SetNextWindowPos(ImVec2(leftSidePanelSize, 0.0f));
-				ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelSize - rightSidePanelSize, io.DisplaySize.y));
+				ImGui::SetNextWindowPos(ImVec2(leftSidePanelWidth, 0.0f));
+				ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelWidth - rightSidePanelWidth, io.DisplaySize.y));
 				ImGui::Begin("MessageWindow", nullptr, windowFlags);
 
 				ImGui::PushFont(fonts["Heading"]);
 				ImGui::Text(user.GetSelectedTeam().GetName());
-				ImGui::Separator();
 				ImGui::PopFont();
+
+				// Render rename and delete buttons if user is owner of selected team
+				if (user.IsTeamOwner(user.GetSelectedTeam()))
+				{
+					ImGui::SameLine();
+					ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 190.0f);
+					if (ImGui::Button("Rename"))
+						openRenamePopup = true;
+
+					ImGui::SameLine();
+					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+					ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+
+					if (ImGui::Button("Delete"))
+						deleteTeam = true;
+
+					ImGui::PopStyleColor(3);
+				}
+
+				ImGui::Separator();
 
 				ImGui::PushFont(fonts["Regular20"]);
 				ImGui::SetNextWindowBgAlpha(0.0f);
-				ImGui::BeginChild("Messages", ImVec2(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2, ImGui::GetWindowHeight() - 150.0f), 0, ImGuiWindowFlags_NoScrollbar);
+				ImGui::BeginChild("Messages", ImVec2(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2, ImGui::GetWindowHeight() - 160.0f), 0, ImGuiWindowFlags_NoScrollbar);
 
 				if (!user.GetSelectedTeam().HasMessages())
 				{
@@ -565,6 +748,13 @@ namespace Client
 					}
 				}
 
+				// Auto scroll messages to buttom on first load
+				if (scrollDown && user.GetSelectedTeam().GetMessageCount())
+				{
+					ImGui::SetScrollHereY();
+					scrollDown = false;
+				}
+
 				ImGui::EndChild();
 
 				static char messageBuffer[256] = {};
@@ -572,7 +762,10 @@ namespace Client
 				ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 60.0f);
 				if (ImGui::InputText("##MessageInput", messageBuffer, sizeof(messageBuffer), ImGuiInputTextFlags_EnterReturnsTrue))
 				{
-					Core::Command command(7);
+					ImGui::SetKeyboardFocusHere(-1);
+					scrollDown = true;
+
+					Core::Command command((uint32_t)MessageResponses::None);
 					command.SetType(Core::CommandType::Command);
 
 					std::string message(messageBuffer);
@@ -585,15 +778,13 @@ namespace Client
 					SendCommandMessage(command);
 
 					memset(messageBuffer, 0, sizeof(messageBuffer));
-
-					ReadTeamMessages();
 				}
 
 				ImGui::PopFont();
 				ImGui::End();
 
-				ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelSize, 0.0f));
-				ImGui::SetNextWindowSize(ImVec2(rightSidePanelSize, io.DisplaySize.y));
+				ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelWidth, 0.0f));
+				ImGui::SetNextWindowSize(ImVec2(rightSidePanelWidth, io.DisplaySize.y));
 
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 				ImGui::Begin("RightSidePanel", nullptr, windowFlags);
@@ -606,12 +797,34 @@ namespace Client
 
 				if (ImGui::BeginTabItem("Members"))
 				{
+					for (Ref<User> teamUser : user.GetSelectedTeam().GetUsers())
+					{
+						ImGui::Text(teamUser->GetName());
+
+						if (user.IsTeamOwner(user.GetSelectedTeam()) && !teamUser->IsTeamOwner(user.GetSelectedTeam()))
+						{
+							ImGui::SameLine();
+							ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+							ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+							ImGui::PushStyleColor(ImGuiCol_Button, redButtonActiveColor);
+							ImGui::Button("Remove");
+							ImGui::PopStyleColor(3);
+						}
+					}
+
 					ImGui::EndTabItem();
 				}
 				ImGui::EndTabBar();
 
 				ImGui::End();
 				ImGui::PopStyleVar();
+
+				if (deleteTeam)
+				{
+					DeleteTeam(user.GetSelectedTeam());
+					user.UnselectTeam();
+					deleteTeam = false;
+				}
 
 				break;
 			}
@@ -640,6 +853,8 @@ namespace Client
 		io.Fonts->Build();
 
 		io.ConfigWindowsMoveFromTitleBarOnly = true;
+		io.LogFilename = nullptr;
+		io.IniFilename = nullptr;
 
 		style.WindowMenuButtonPosition = ImGuiDir_None;
 
@@ -654,20 +869,26 @@ namespace Client
 		style.Colors[ImGuiCol_WindowBg] = ImVec4{ 0.17862745098039217f ,0.16294117647058825f, 0.2296078431372549f, 1.0f };
 		style.Colors[ImGuiCol_ChildBg] = ImVec4 { 0.3764705882352941f ,0.3254901960784314f, 0.41568627450980394f, 1.0f };
 		style.Colors[ImGuiCol_FrameBg] = ImVec4{ 0.23137254901960785f, 0.21176470588235294f, 0.2980392156862745f, 1.0f };
+
 		style.Colors[ImGuiCol_Button] = ImVec4{ 0.43137254901960786f, 0.32941176470588235f, 0.7098039215686275f, 1.0f };
 		style.Colors[ImGuiCol_ButtonHovered] = style.Colors[ImGuiCol_Button];
 		style.Colors[ImGuiCol_ButtonActive] = ImVec4{ 0.33137254901960786f, 0.22941176470588235f, 0.6098039215686275f, 1.0f };
+
 		style.Colors[ImGuiCol_Text] = ImVec4{ 1.0f, 1.0f, 1.0f, 1.0f };
 		style.Colors[ImGuiCol_TextLink] = ImVec4{ 0.63137254901960786f, 0.52941176470588235f, 0.9098039215686275f, 1.0f };
+
 		style.Colors[ImGuiCol_Header] = style.Colors[ImGuiCol_Button];
 		style.Colors[ImGuiCol_HeaderHovered] = style.Colors[ImGuiCol_ButtonHovered];
 		style.Colors[ImGuiCol_HeaderActive] = style.Colors[ImGuiCol_ButtonActive];
 		style.Colors[ImGuiCol_Separator] = style.Colors[ImGuiCol_WindowBg];
+
+		style.Colors[ImGuiCol_Tab] = style.Colors[ImGuiCol_Button];
+		style.Colors[ImGuiCol_TabActive] = style.Colors[ImGuiCol_ButtonActive];
 	}
 
 	void ClientApp::SendLoginMessage()
 	{
-		Core::Command command(1);
+		Core::Command command((uint32_t)MessageResponses::Login);
 		command.SetType(Core::CommandType::Query);
 		
 		command.SetCommandString("SELECT id, password, first_name, last_name, role FROM users WHERE email=?;");
@@ -678,7 +899,7 @@ namespace Client
 
 	void ClientApp::SendRegisterMessage()
 	{
-		Core::Command command(2);
+		Core::Command command((uint32_t)MessageResponses::Register);
 		command.SetType(Core::CommandType::Command);
 
 		command.SetCommandString("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, 'user');");
@@ -702,11 +923,10 @@ namespace Client
 
 	void ClientApp::ReadUserTeams()
 	{
-		Core::Command command(6);
+		Core::Command command((uint32_t)MessageResponses::ProcessTeams);
 		command.SetType(Core::CommandType::Query);
 
-		// TODO: select teams
-		command.SetCommandString("SELECT teams.id, teams.name FROM users_teams JOIN teams ON users_teams.team_id = teams.id WHERE users_teams.user_id = ?;");
+		command.SetCommandString("SELECT teams.id, teams.owner_id, teams.name FROM users_teams JOIN teams ON users_teams.team_id = teams.id WHERE users_teams.user_id = ?;");
 		command.AddData(new Core::DatabaseInt(user.GetId()));
 
 		SendCommandMessage(command);
@@ -714,13 +934,60 @@ namespace Client
 
 	void ClientApp::ReadTeamMessages()
 	{
-		Core::Command command(8);
+		Core::Command command((uint32_t)MessageResponses::ProcessTeamMessages);
 		command.SetType(Core::CommandType::Query);
 
-		command.SetCommandString("SELECT messages.content, users.first_name, users.last_name FROM messages JOIN users ON messages.author_id = users.id JOIN teams ON messages.team_id = teams.id WHERE messages.team_id = ? ORDER BY messages.created_at ASC LIMIT 15;");
+		command.SetCommandString("SELECT * FROM (SELECT messages.id, messages.content, users.first_name, users.last_name FROM messages JOIN users ON messages.author_id = users.id WHERE messages.team_id = ? ORDER BY messages.id DESC LIMIT 40) AS subquery ORDER BY subquery.id ASC;");
 		command.AddData(new Core::DatabaseInt(user.GetSelectedTeam().GetId()));
 
 		SendCommandMessage(command);
+	}
+
+	void ClientApp::ReadTeamUsers()
+	{
+		Core::Command command((uint32_t)MessageResponses::ProcessTeamUsers);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT users.id, users.first_name, users.last_name FROM users_teams JOIN users ON users_teams.user_id = users.id WHERE users_teams.team_id = ?;");
+		command.AddData(new Core::DatabaseInt(user.GetSelectedTeam().GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::DeleteTeam(Team& team)
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Command);
+
+		command.AddData(new Core::DatabaseInt(user.GetSelectedTeam().GetId()));
+		command.SetCommandString("DELETE FROM users_teams WHERE team_id = ?;");
+		SendCommandMessage(command);
+
+		command.SetCommandString("DELETE FROM messages WHERE team_id = ?;");
+		SendCommandMessage(command);
+
+		// TODO: delete assignments and invites
+
+		command.SetCommandString("DELETE FROM teams WHERE id = ?;");
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::RenameTeam(Team& team, const char* teamName)
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Update);
+
+		command.SetCommandString("UPDATE teams set name = ? WHERE id = ?;");
+		command.AddData(new Core::DatabaseString(teamName));
+		command.AddData(new Core::DatabaseInt(user.GetSelectedTeam().GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::ValidateUserSelection(Ref<Team> firstTeam)
+	{
+		// Select first team if no team is selected
+		
 	}
 }
 

@@ -14,6 +14,7 @@ namespace Core
 		inline virtual const std::error_code& GetErrorCode() const = 0;
 
 		virtual void SendMessagePackets(Ref<Message>& message) = 0;
+		virtual void SendMessagePacketsToAllClients(Ref<Message>& message) = 0;
 
 		virtual Ref<Session> FindSessionById(uint32_t SessionId) = 0;
 
