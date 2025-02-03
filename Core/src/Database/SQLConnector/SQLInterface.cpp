@@ -18,6 +18,8 @@ namespace Core
 			driver = get_driver_instance();
 			connection = driver->connect(address, username, password);
 			connection->setSchema(database);
+			connection->setClientOption("CHARSET", "utf8mb4");
+
 			INFO("Database connected!");
 		}
 		catch (const sql::SQLException& e)

@@ -22,6 +22,7 @@ project "Core"
 		"$(SolutionDir)vendor/glfw/include",
 		"$(SolutionDir)vendor/asio/asio/include",
 		"$(SolutionDir)vendor/mysql connector/include",
+		"$(SolutionDir)vendor/Bcrypt/include",
 		"$(SolutionDir)vendor/imgui/src",
 	}
 
@@ -30,6 +31,7 @@ project "Core"
 		"opengl32.lib",
 		"Ws2_32.lib",
 		"Crypt32.lib",
+		"$(SolutionDir)vendor/Bcrypt/bcrypt.lib",
 		"GLFW",
 		"ImGui",
 	}

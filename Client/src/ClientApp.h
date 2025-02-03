@@ -56,7 +56,7 @@ namespace Client
 	struct LoginData
 	{
 		std::string Email;
-		std::string PasswordHash;
+		std::string Password;
 		LoginErrorType Error = LoginErrorType::None;
 	};
 

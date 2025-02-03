@@ -47,8 +47,8 @@ namespace Core
 
 		DatabaseString(std::string& string)
 		{
-			strncpy(String, string.c_str(), string.size() - 1);
-			String[string.size() - 1] = '\0';
+			strncpy(String, string.c_str(), string.size());
+			String[string.size()] = '\0';
 		}
 
 		static DatabaseDataType GetStaticType() { return DatabaseDataType::String; }

@@ -6,6 +6,7 @@
 #include "Debugging/Log.h"
 #include "Resources/Fonts.h"
 #include "Database/Response.h"
+#include "Database/Hash.h"
 
 namespace Client
 {
@@ -56,7 +57,7 @@ namespace Client
 			{
 				case MessageResponses::Login: // Login
 				{
-					if (response.HasData() && std::string((const char*)response[1].GetValue()) == loginData.PasswordHash)
+					if (response.HasData() && Core::ValidateHash(loginData.Password.c_str(), (const char*)response[1].GetValue()))
 					{
 						loggedUser.SetId(*(int*)response[0].GetValue());
 						loggedUser.SetName(std::string((const char*)response[2].GetValue()) + " " + std::string((const char*)response[3].GetValue()));
@@ -74,7 +75,7 @@ namespace Client
 					else
 						loginData.Error = LoginErrorType::Incorrect;
 
-					loginData.PasswordHash.clear();
+					loginData.Password.clear();
 					break;
 				}
 				case MessageResponses::Register: // Register
@@ -318,7 +319,7 @@ namespace Client
 			if (!std::string(emailBuffer).empty() && !std::string(passwordBuffer).empty())
 			{
 				loginData.Email = emailBuffer;
-				loginData.PasswordHash = passwordBuffer;
+				loginData.Password = passwordBuffer;
 
 				SendLoginMessage();
 			}
@@ -336,7 +337,7 @@ namespace Client
 			if (!std::string(emailBuffer).empty() && !std::string(passwordBuffer).empty())
 			{
 				loginData.Email = emailBuffer;
-				loginData.PasswordHash = passwordBuffer;
+				loginData.Password = passwordBuffer;
 
 				SendLoginMessage();
 
@@ -356,9 +357,12 @@ namespace Client
 		ImGui::Text("Don't have an account?");
 		ImGui::SameLine();
 
-		// Switch application state if link is clicked
+		// Switch application state and reset previous error if link is clicked
 		if (ImGui::TextLink("Create account"))
+		{
+			loginData.Error = LoginErrorType::None;
 			state = ClientState::Register;
+		}
 
 		ImGui::PopStyleVar();
 		ImGui::PopStyleColor();
@@ -459,7 +463,7 @@ namespace Client
 					registerData.FirstName = firstNameBuffer;
 					registerData.LastName = lastNameBuffer;
 					registerData.Email = emailBuffer;
-					registerData.PasswordHash = passwordBuffer;
+					registerData.PasswordHash = Core::GenerateHash(passwordBuffer);
 
 					static std::regex pattern("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
 
@@ -494,8 +498,12 @@ namespace Client
 
 		ImGui::Text("Already have an account?");
 		ImGui::SameLine();
+		// Switch application state and reset previous error if link is clicked
 		if (ImGui::TextLink("Log in"))
+		{
+			registerData.Error = RegisterErrorType::None;
 			state = ClientState::Login;
+		}
 
 		ImGui::PopStyleVar();
 		ImGui::PopStyleColor();
@@ -957,7 +965,7 @@ namespace Client
 		Core::Command command((uint32_t)MessageResponses::Register);
 		command.SetType(Core::CommandType::Command);
 
-		command.SetCommandString("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, 'user');");
+		command.SetCommandString("INSERT INTO users (first_name, last_name, email, password) VALUES (?, ?, ?, ?);");
 		command.AddData(new Core::DatabaseString(registerData.FirstName));
 		command.AddData(new Core::DatabaseString(registerData.LastName));
 		command.AddData(new Core::DatabaseString(registerData.Email));
