@@ -40,6 +40,8 @@ namespace Core
 
 		static inline bool IsApplicationRunning() { return isApplicationRunning; }
 		static inline Application& Get() { return *instance; }
+
+		inline void Restart() { isRunning = false; }
 	protected:
 		void OnWindowClose(WindowClosedEvent& e);
 

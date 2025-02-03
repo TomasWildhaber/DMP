@@ -11,8 +11,8 @@ namespace Server
 	{
 		SetLoggerTitle("Server");
 
-		networkInterface = Core::NetworkServerInterface::Create(20000, messageQueue, sessions);
 		databaseInterface = Core::DatabaseInterface::Create("tcp://127.0.0.1:3306", "dmp", "dmp", "Tester_123");
+		networkInterface = Core::NetworkServerInterface::Create(20000, messageQueue, sessions);
 	}
 
 	void ServerApp::OnEvent(Core::Event& e)
@@ -47,6 +47,12 @@ namespace Server
 
 	void ServerApp::ProcessMessageQueue()
 	{
+		while (!databaseInterface->IsConnected())
+		{
+			networkInterface->DisconnectAllClients();
+			databaseInterface->Reconnect();
+		}
+
 		for (uint32_t i = 0; i < messageQueue.GetCount(); i++)
 			ProcessMessage();
 	}

@@ -10,9 +10,11 @@ namespace Core
 	class SQLInterface : public DatabaseInterface
 	{
 	public:
-		SQLInterface(const char* address, const char* database, const char* username, const char* password);
+		SQLInterface(const char* address, const char* databaseName, const char* username, const char* password);
 
 		virtual inline const bool IsConnected() const override { return connection->isValid(); };
+
+		virtual void Reconnect() override;
 
 		virtual bool Execute(Command& command) override;
 		virtual bool Query(Command& command) override;
@@ -25,5 +27,7 @@ namespace Core
 		Ref<sql::Connection> connection;
 		Ref<sql::PreparedStatement> statement;
 		Ref<sql::ResultSet> result;
+
+		const char* database;
 	};
 }

@@ -1,17 +1,18 @@
 #include "pch.h"
 #include "SQLInterface.h"
 #include "Debugging/Log.h"
+#include "Core/Application.h"
 
 #include <jdbc/cppconn/exception.h>
 
 namespace Core
 {
-	Ref<DatabaseInterface> DatabaseInterface::Create(const char* address, const char* database, const char* username, const char* password)
+	Ref<DatabaseInterface> DatabaseInterface::Create(const char* address, const char* databaseName, const char* username, const char* password)
 	{
-		return new SQLInterface(address, database, username, password);
+		return new SQLInterface(address, databaseName, username, password);
 	}
 
-	SQLInterface::SQLInterface(const char* address, const char* database, const char* username, const char* password)
+	SQLInterface::SQLInterface(const char* address, const char* databaseName, const char* username, const char* password) : database(databaseName)
 	{
 		try
 		{
@@ -24,8 +25,23 @@ namespace Core
 		}
 		catch (const sql::SQLException& e)
 		{
-			ERROR("Database connection failed!");
+			ERROR("Database connection failed, attempting reconnect!");
 			ERROR("{0}", e.getSQLStateCStr());
+
+			Application::Get().Restart();
+		}
+	}
+
+	void SQLInterface::Reconnect()
+	{
+		ERROR("Database connection failed, attempting reconnect!");
+
+		if (connection->reconnect())
+		{
+			connection->setSchema(database);
+			connection->setClientOption("CHARSET", "utf8mb4");
+
+			INFO("Database connected!");
 		}
 	}
 

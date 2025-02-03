@@ -24,6 +24,15 @@ namespace Core
 			contextThread.join();
 	}
 
+	void AsioServerInterface::DisconnectAllClients()
+	{
+		for (Ref<Session> session : sessions)
+		{
+			if (session && session->IsOpen())
+				session->Disconnect();
+		}
+	}
+
 	void AsioServerInterface::SendMessagePackets(Ref<Message>& message)
 	{
 		Ref<Session> session = FindSessionById(message->GetSessionId());

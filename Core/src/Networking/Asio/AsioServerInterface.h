@@ -13,6 +13,8 @@ namespace Core
 
 		inline virtual const std::error_code& GetErrorCode() const override { return errorCode; }
 
+		virtual void DisconnectAllClients() override;
+
 		virtual void SendMessagePackets(Ref<Message>& message) override;
 		virtual void SendMessagePacketsToAllClients(Ref<Message>& message) override;
 
