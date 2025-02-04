@@ -264,6 +264,26 @@ namespace Client
 				break;
 			}
 		}
+
+		// If is not connected to server open modal window for reconnecting
+		if (!networkInterface->IsConnected() && !ImGui::IsPopupOpen("Reconnect"))
+			ImGui::OpenPopup("Reconnect");
+
+		// Center reconnect popup if it's open
+		if (ImGui::IsPopupOpen("Reconnect"))
+			ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x / 2, ImGui::GetIO().DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+		// If is not connected to render open modal window for reconnecting
+		if (ImGui::BeginPopupModal("Reconnect", nullptr, windowFlags))
+		{
+			ImGui::Text("Reconnecting...");
+
+			// Close if is connected
+			if (networkInterface->IsConnected())
+				ImGui::CloseCurrentPopup();
+
+			ImGui::EndPopup();
+		}
 	}
 
 	void ClientApp::RenderLoginWindow(ImGuiWindowFlags flags)
@@ -544,7 +564,7 @@ namespace Client
 			openRenamePopup = false;
 		}
 
-		// Center creation popup if is open
+		// Center creation popup if it's open
 		if (ImGui::IsPopupOpen("TeamCreation"))
 			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
@@ -593,7 +613,7 @@ namespace Client
 			ImGui::EndPopup();
 		}
 
-		// Center rename popup if is open
+		// Center rename popup if it's open
 		if (ImGui::IsPopupOpen("TeamRename"))
 			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 

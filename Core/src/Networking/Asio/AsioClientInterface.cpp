@@ -12,17 +12,51 @@ namespace Core
 		return new AsioClientInterface(domain, port, inputMessageQueue);
 	}
 	
-	AsioClientInterface::AsioClientInterface(const char* domain, uint16_t port, MessageQueue& inputMessageQueue) : inputMessageQueue(inputMessageQueue)
+	AsioClientInterface::AsioClientInterface(const char* domain, uint16_t port, MessageQueue& inputMessageQueue) : inputMessageQueue(inputMessageQueue), domain(domain), port(port)
 	{
 		asio::ip::tcp::resolver resolver(context);
-		asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(domain, std::to_string(port));
-
 		socket = new asio::ip::tcp::socket(context);
 		
+		Connect(resolver.resolve(domain, std::to_string(port)), port);
+
+		contextThread = std::thread([&]() { context.run(); });
+	}
+
+	AsioClientInterface::~AsioClientInterface()
+	{
+		if (IsConnected())
+			Disconnect();
+
+		context.stop();
+
+		if (contextThread.joinable())
+			contextThread.join();
+	}
+
+	void AsioClientInterface::Reconnect()
+	{
+		asio::ip::tcp::resolver resolver(context);
+		Connect(resolver.resolve(domain, std::to_string(port)), port);
+	}
+
+	void AsioClientInterface::Disconnect()
+	{
+		isConnected = false;
+
+		asio::post(context, [this]() { socket->close(); });
+
+		DisconnectedEvent event;
+		Application::Get().OnEvent(event);
+	}
+
+	void AsioClientInterface::Connect(const asio::ip::tcp::resolver::results_type& endpoints, uint16_t port)
+	{
 		asio::async_connect(socket.Get(), endpoints, [&](std::error_code errorCode, asio::ip::tcp::endpoint endpoint)
 		{
 			if (!errorCode)
 			{
+				isConnected = true;
+
 				const std::string& _domain = socket->remote_endpoint().address().to_string();
 				ConnectedEvent event(_domain.c_str(), port);
 				Application::Get().OnEvent(event);
@@ -30,18 +64,11 @@ namespace Core
 				ReadMessagePackets();
 			}
 			else
+			{
 				ERROR("Failed to connect: {0}", errorCode.message());
+				Reconnect();
+			}
 		});
-
-		contextThread = std::thread([&]() { context.run(); });
-	}
-
-	AsioClientInterface::~AsioClientInterface()
-	{
-		context.stop();
-
-		if (contextThread.joinable())
-			contextThread.join();
 	}
 
 	void AsioClientInterface::SendMessagePackets(Ref<Message>& message)
@@ -65,6 +92,7 @@ namespace Core
 			if (errorCode)
 			{
 				Disconnect();
+				Reconnect();
 				return;
 			}
 
@@ -73,6 +101,7 @@ namespace Core
 				if (errorCode)
 				{
 					Disconnect();
+					Reconnect();
 					return;
 				}
 
@@ -94,6 +123,7 @@ namespace Core
 			if (errorCode)
 			{
 				Disconnect();
+				Reconnect();
 				return;
 			}
 
@@ -104,6 +134,7 @@ namespace Core
 				if (errorCode)
 				{
 					Disconnect();
+					Reconnect();
 					return;
 				}
 
@@ -117,13 +148,5 @@ namespace Core
 				ReadMessagePackets();
 			});
 		});
-	}
-
-	void AsioClientInterface::Disconnect()
-	{
-		asio::post(context, [this]() { socket->close(); });
-
-		DisconnectedEvent event;
-		Application::Get().OnEvent(event);
 	}
 }
