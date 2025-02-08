@@ -38,6 +38,7 @@ namespace Client
 		UpdateTeams, // Reserved by server
 		UpdateMessages, // Reserved by server
 		UpdateUsers, // Reserved by server
+		UpdateInvites, // Reserved by server
 		ProcessTeams,
 		ProcessTeamMessages,
 		ProcessTeamUsers,
@@ -79,9 +80,21 @@ namespace Client
 		ClientApp(const Core::ApplicationSpecifications& specs);
 
 		virtual void OnEvent(Core::Event& e) override;
+	private:
+		// Config file methods
+		void ReadConfigFile() override;
+		void WriteConfigFile() override;
+
+		// Event functions
+		void OnConnect(Core::ConnectedEvent& e);
+		void OnDisconnect(Core::DisconnectedEvent& e);
+		void OnMessageSent(Core::MessageSentEvent& e);
+		void OnMessageAccepted(Core::MessageAcceptedEvent& e);
+
+		// Networking methods
 		virtual void ProcessMessageQueue() override;
 		void ProcessMessage();
-	private:
+
 		// UI functions
 		void SetStyle();
 		void Render();
@@ -89,12 +102,6 @@ namespace Client
 		void RenderLoginWindow(ImGuiWindowFlags flags);
 		void RenderRegisterWindow(ImGuiWindowFlags flags);
 		void RenderHomeWindow(ImGuiWindowFlags flags);
-
-		// Event functions
-		void OnConnect(Core::ConnectedEvent& e);
-		void OnDisconnect(Core::DisconnectedEvent& e);
-		void OnMessageSent(Core::MessageSentEvent& e);
-		void OnMessageAccepted(Core::MessageAcceptedEvent& e);
 
 		// Sending methods
 		void SendCommandMessage(Core::Command& command);
@@ -113,6 +120,10 @@ namespace Client
 		// Networking
 		Ref<Core::NetworkClientInterface> networkInterface;
 		Core::MessageQueue messageQueue;
+
+		// Networking target specifications
+		std::string address;
+		uint32_t port = 0;
 
 		// Map for saving fonts
 		FontMap fonts;

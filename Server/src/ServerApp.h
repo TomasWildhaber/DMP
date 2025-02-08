@@ -14,12 +14,18 @@ namespace Server
 
 		virtual void OnEvent(Core::Event& e) override;
 	private:
+		// Config file methods
+		void ReadConfigFile() override;
+		void WriteConfigFile() override;
+
+		// Event functions
 		void OnClientConnected(Core::ConnectedEvent& e);
 		void OnClientDisconnected(Core::DisconnectedEvent& e);
 		void OnMessageSent(Core::MessageSentEvent& e);
 		void OnMessageAccepted(Core::MessageAcceptedEvent& e);
 
-		void ProcessMessageQueue();
+		// Networking methods
+		void ProcessMessageQueue() override;
 		void ProcessMessage();
 
 		void SendResponse(Core::Response& response);
@@ -31,5 +37,7 @@ namespace Server
 		Core::MessageQueue messageQueue;
 
 		Ref<Core::DatabaseInterface> databaseInterface;
+
+		uint32_t port = 0;
 	};
 }

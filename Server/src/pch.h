@@ -17,11 +17,14 @@
 #include <unordered_map>
 #include <unordered_set>
 
-// Others
+// Files
 #include <fstream>
+#include <filesystem>
 
+// Others
 #include <mutex>
 
+#include <regex>
 #include <ctime>
 #include <any>
 

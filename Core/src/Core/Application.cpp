@@ -31,6 +31,14 @@ namespace Core
 		}
 	}
 
+	void Application::LoadConfig()
+	{
+		if (!std::filesystem::exists(configFilePath))
+			WriteConfigFile();
+
+		ReadConfigFile();
+	}
+
 	void Application::OnEvent(Event& e)
 	{
 		Event::Dispatch<WindowResizedEvent>(e, [this](WindowResizedEvent& e) { window->OnResize(e); });

@@ -11,8 +11,11 @@ namespace Server
 	{
 		SetLoggerTitle("Server");
 
+		LoadConfig();
+
 		databaseInterface = Core::DatabaseInterface::Create("tcp://127.0.0.1:3306", "dmp", "dmp", "Tester_123");
-		networkInterface = Core::NetworkServerInterface::Create(20000, messageQueue, sessions);
+		networkInterface = Core::NetworkServerInterface::Create(port, messageQueue, sessions);
+		INFO("Running on port {0}", port);
 	}
 
 	void ServerApp::OnEvent(Core::Event& e)
@@ -23,6 +26,33 @@ namespace Server
 		Core::Event::Dispatch<Core::DisconnectedEvent>(e, [this](Core::DisconnectedEvent& e) { OnClientDisconnected(e); });
 		Core::Event::Dispatch<Core::MessageSentEvent>(e, [this](Core::MessageSentEvent& e) { OnMessageSent(e); });
 		Core::Event::Dispatch<Core::MessageAcceptedEvent>(e, [this](Core::MessageAcceptedEvent& e) { OnMessageAccepted(e); });
+	}
+
+	// Format (port: 20000)
+	void ServerApp::ReadConfigFile()
+	{
+		std::ifstream file(configFilePath);
+
+		std::string property;
+		file >> property;
+
+		if (property == "port:")
+			file >> port;
+
+		if (!port)
+		{
+			WriteConfigFile();
+			ReadConfigFile();
+		}
+	}
+
+	// Format (port: 20000)
+	void ServerApp::WriteConfigFile()
+	{
+		std::ofstream file(configFilePath);
+
+		// Write default port
+		file << "port: " << 20000 << std::endl;
 	}
 
 	void ServerApp::OnClientConnected(Core::ConnectedEvent& e)

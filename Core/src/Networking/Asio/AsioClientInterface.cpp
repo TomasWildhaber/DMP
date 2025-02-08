@@ -11,6 +11,11 @@ namespace Core
 	{
 		return new AsioClientInterface(domain, port, inputMessageQueue);
 	}
+
+	Ref<NetworkClientInterface> NetworkClientInterface::Create(std::string& domain, uint16_t port, MessageQueue& inputMessageQueue)
+	{
+		return new AsioClientInterface(domain.c_str(), port, inputMessageQueue);
+	}
 	
 	AsioClientInterface::AsioClientInterface(const char* domain, uint16_t port, MessageQueue& inputMessageQueue) : inputMessageQueue(inputMessageQueue), domain(domain), port(port)
 	{

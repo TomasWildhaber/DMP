@@ -19,7 +19,7 @@ namespace Core
 		virtual void SendMessagePackets(Ref<Message>& message) = 0;
 		virtual void ReadMessagePackets() = 0;
 
-
 		static Ref<NetworkClientInterface> Create(const char* domain, uint16_t port, MessageQueue& inputMessageQueue);
+		static Ref<NetworkClientInterface> Create(std::string& domain, uint16_t port, MessageQueue& inputMessageQueue);
 	};
 }

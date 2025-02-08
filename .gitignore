@@ -15,3 +15,6 @@ Makefile
 
 # visual studip code files
 .vscode
+
+# config files
+settings.cfg

@@ -20,7 +20,8 @@ namespace Client
 		// Set logger title in dev mode
 		SetLoggerTitle("Client");
 
-		networkInterface = Core::NetworkClientInterface::Create("127.0.0.1", 20000, messageQueue);
+		LoadConfig();
+		networkInterface = Core::NetworkClientInterface::Create(address, port, messageQueue);
 		window->SetRenderFunction([this]() { Render(); });
 		SetStyle();
 
@@ -36,6 +37,37 @@ namespace Client
 		Core::Event::Dispatch<Core::DisconnectedEvent>(e, [this](Core::DisconnectedEvent& e) { OnDisconnect(e); });
 		Core::Event::Dispatch<Core::MessageSentEvent>(e, [this](Core::MessageSentEvent& e) { OnMessageSent(e); });
 		Core::Event::Dispatch<Core::MessageAcceptedEvent>(e, [this](Core::MessageAcceptedEvent& e) { OnMessageAccepted(e); });
+	}
+
+	void ClientApp::ReadConfigFile()
+	{
+		std::ifstream file(configFilePath);
+
+		std::string property;
+		while (file >> property)
+		{
+			if (property == "address:")
+				file >> address;
+			else if (property == "port:")
+				file >> port;
+			else
+				break;
+		}
+
+		if (!port || address.empty())
+		{
+			WriteConfigFile();
+			ReadConfigFile();
+		}
+	}
+
+	void ClientApp::WriteConfigFile()
+	{
+		std::ofstream file(configFilePath);
+
+		// Write default address and port
+		file << "address: " << "127.0.0.1" << std::endl;
+		file << "port: " << 20000 << std::endl;
 	}
 
 	void ClientApp::ProcessMessageQueue()
@@ -242,7 +274,7 @@ namespace Client
 		ImGui::PopStyleVar();
 		ImGui::End();
 
-		// Ensure application is set in dev mode
+		// Ensure application state is set (in dev mode)
 		ASSERT(state == ClientState::None, "Application state has not been set!");
 
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
@@ -543,9 +575,6 @@ namespace Client
 		// Bool for automatic messages scroll
 		static bool scrollDown = true;
 
-		// Bool for deleting team - needs to be done at the end of frame
-		static bool deleteTeam = false;
-
 		// Widths of side panels
 		static float leftSidePanelWidth = 300.0f;
 		static float rightSidePanelWidth = 400.0f;
@@ -766,7 +795,7 @@ namespace Client
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
 
 			if (ImGui::Button("Delete"))
-				deleteTeam = true;
+				DeleteSelectedTeam();
 
 			ImGui::PopStyleColor(3);
 		}
@@ -816,7 +845,7 @@ namespace Client
 			}
 		}
 
-		// Auto scroll messages to buttom on first load
+		// Auto scroll messages to buttom on load and after messages get updated
 		if (scrollDown && loggedUser.GetSelectedTeam().GetMessageCount())
 		{
 			ImGui::SetScrollHereY();
@@ -886,13 +915,6 @@ namespace Client
 
 		ImGui::End();
 		ImGui::PopStyleVar();
-
-		// Delete team at the end of frame if delete button was clicked
-		if (deleteTeam)
-		{
-			DeleteSelectedTeam();
-			deleteTeam = false;
-		}
 	}
 
 	void ClientApp::SetStyle()
