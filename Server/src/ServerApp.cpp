@@ -206,6 +206,38 @@ namespace Server
 			Core::Response response(5);
 			SendResponseToAllClients(response);
 		}
+		else if (tableName == "invites")
+		{
+			Core::Response response(8);
+			SendResponseToAllClients(response);
+		}
+		else if (tableName == "notifications")
+		{
+			Core::Response response(9);
+			SendResponseToAllClients(response);
+		}
+		else if (tableName == "users_teams")
+		{
+			{
+				Core::Response response(5);
+				SendResponseToAllClients(response);
+			}
+
+			{
+				Core::Response response(7);
+				SendResponseToAllClients(response);
+			}
+
+			{
+				Core::Response response(8);
+				SendResponseToAllClients(response);
+			}
+
+			{
+				Core::Response response(9);
+				SendResponseToAllClients(response);
+			}
+		}
 	}
 }
 

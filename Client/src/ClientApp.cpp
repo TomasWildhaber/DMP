@@ -14,6 +14,13 @@ namespace Client
 	ImVec4 errorColor(0.845098039f, 0.0f, 0.0f, 1.0f);
 	ImVec4 redButtonColor(0.5803921568627451f, 0.0f, 0.0f, 1.0f);
 	ImVec4 redButtonActiveColor(0.4803921568627451f, 0.0f, 0.0f, 1.0f);
+	ImVec4 successColor(0.09411764705882353f, 0.48627450980392156f, 0.09803921568627451f, 1.0f);
+
+	// Global int to store id of invited user
+	uint32_t invitedUserId = 0;
+
+	// Global bools showing user page
+	static bool showUserPage = false;
 
 	ClientApp::ClientApp(const Core::ApplicationSpecifications& specs) : Core::Application(specs)
 	{
@@ -89,20 +96,24 @@ namespace Client
 			{
 				case MessageResponses::Login: // Login
 				{
+					// Response: id, password hash, first name, last name, email, role
 					if (response.HasData() && Core::ValidateHash(loginData.Password.c_str(), (const char*)response[1].GetValue()))
 					{
 						loggedUser.SetId(*(int*)response[0].GetValue());
 						loggedUser.SetName(std::string((const char*)response[2].GetValue()) + " " + std::string((const char*)response[3].GetValue()));
+						loggedUser.SetEmail((const char*)response[4].GetValue());
 
-						if (std::string((const char*)response[4].GetValue()) == "user")
+						if (std::string((const char*)response[5].GetValue()) == "user")
 							loggedUser.SetAdminPrivileges(false);
 						else
 							loggedUser.SetAdminPrivileges(true);
 
-						ReadUsersTeams();
-
 						loginData.Error = LoginErrorType::None;
 						state = ClientState::Home;
+
+						ReadUsersTeams();
+						ReadUsersInvites();
+						ReadUsersNotifications();
 					}
 					else
 						loginData.Error = LoginErrorType::Incorrect;
@@ -125,10 +136,66 @@ namespace Client
 				}
 				case MessageResponses::CheckEmail: // Check email
 				{
-					if (!response.HasData())
-						SendRegisterMessage();
+					// Respsonse: id, email
+					if (state == ClientState::Home)
+					{
+						if (!loggedUser.HasSelectedTeam() || !loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+							break;
+
+						if (response.HasData())
+						{
+							invitedUserId = *(int*)response[0].GetValue();
+							SendCheckInviteMessage(invitedUserId);
+						}
+						else
+							inviteState = InviteState::NotExisting;
+					}
 					else
-						registerData.Error = RegisterErrorType::Existing;
+					{
+						if (!response.HasData())
+							SendRegisterMessage();
+						else
+							registerData.Error = RegisterErrorType::Existing;
+					}
+
+					break;
+				}
+				case MessageResponses::CheckInvite:
+				{
+					if (!loggedUser.HasSelectedTeam() || !loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+						break;
+
+					if (!response.HasData())
+						SendCheckTeamMessage(invitedUserId);
+					else
+						inviteState = InviteState::AlreadyInvited;
+
+					break;
+				}
+				case MessageResponses::CheckTeam:
+				{
+					if (!loggedUser.HasSelectedTeam() || !loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+						break;
+
+					if (!response.HasData())
+					{
+						inviteState = InviteState::InviteSuccessful;
+
+						Core::Command command((uint32_t)MessageResponses::None);
+						command.SetType(Core::CommandType::Command);
+
+						command.SetCommandString("INSERT INTO invites (user_id, team_id) VALUES (?, ?);");
+						command.AddData(new Core::DatabaseInt(invitedUserId));
+						command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+
+						SendCommandMessage(command);
+
+						std::string message = "You have been invited to ";
+						message += loggedUser.GetSelectedTeam().GetName();
+						SendNotificationMessage(invitedUserId, message.c_str());
+					}
+					else
+						inviteState = InviteState::AlreadyInTeam;
 
 					break;
 				}
@@ -172,6 +239,18 @@ namespace Client
 
 					break;
 				}
+				case MessageResponses::UpdateInvites:
+				{
+					ReadUsersInvites();
+
+					break;
+				}
+				case MessageResponses::UpdateNotifications:
+				{
+					ReadUsersNotifications();
+
+					break;
+				}
 				case MessageResponses::ProcessTeams: // Process teams
 				{
 					loggedUser.ClearTeams();
@@ -189,7 +268,9 @@ namespace Client
 
 					if (!loggedUser.IsSelectedTeamValid())
 					{
-						if (firstTeam)
+						inviteState = InviteState::None;
+
+						if (firstTeam && !showUserPage)
 							loggedUser.SetSelectedTeam(firstTeam);
 						else
 							loggedUser.UnselectTeam();
@@ -206,31 +287,57 @@ namespace Client
 				}
 				case MessageResponses::ProcessTeamMessages: // Process team messages
 				{
-					loggedUser.GetSelectedTeam().ClearMessages();
-
-					// Load messages
-					for (uint32_t i = 0; i < response.GetDataCount(); i += 4) // Response: id, content, first name, last name 
+					if (loggedUser.HasSelectedTeam())
 					{
-						// Construct full name
-						std::string name = std::string((const char*)response[i + 2].GetValue()) + " " + (const char*)response[i + 3].GetValue();
-						// Add message
-						loggedUser.GetSelectedTeam().AddMessage(new Message(name.c_str(), (const char*)response[i + 1].GetValue()));
+						loggedUser.GetSelectedTeam().ClearMessages();
+
+						// Load messages
+						for (uint32_t i = 0; i < response.GetDataCount(); i += 4) // Response: id, content, first name, last name 
+						{
+							// Construct full name
+							std::string name = std::string((const char*)response[i + 2].GetValue()) + " " + (const char*)response[i + 3].GetValue();
+							// Add message
+							loggedUser.GetSelectedTeam().AddMessage(new Message(name.c_str(), (const char*)response[i + 1].GetValue()));
+						}
 					}
 
 					break;
 				}
 				case MessageResponses::ProcessTeamUsers:
 				{
-					loggedUser.GetSelectedTeam().ClearUsers();
-
-					// Load team users
-					for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id, first name, last name 
+					if (loggedUser.HasSelectedTeam())
 					{
-						// Construct full name
-						std::string name = std::string((const char*)response[i + 1].GetValue()) + " " + (const char*)response[i + 2].GetValue();
-						// Add user
-						loggedUser.GetSelectedTeam().AddUser(new User(*(int*)response[i].GetValue(), name));
+						loggedUser.GetSelectedTeam().ClearUsers();
+
+						// Load team users
+						for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id, first name, last name 
+						{
+							// Construct full name
+							std::string name = std::string((const char*)response[i + 1].GetValue()) + " " + (const char*)response[i + 2].GetValue();
+							// Add user
+							loggedUser.GetSelectedTeam().AddUser(new User(*(int*)response[i].GetValue(), name));
+						}
 					}
+
+					break;
+				}
+				case MessageResponses::ProcessInvites:
+				{
+					loggedUser.ClearInvites();
+
+					// Load user invites
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id, team id, team name
+						loggedUser.AddInvite(new Invite(*(int*)response[i].GetValue(), *(int*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue())); // Add invite
+
+					break;
+				}
+				case MessageResponses::ProcessNotifications:
+				{
+					loggedUser.ClearNotifications();
+
+					// Load user notifications
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 2) // Response: id, message
+						loggedUser.AddNotification(new Notification(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue())); // Add notification
 
 					break;
 				}
@@ -510,7 +617,7 @@ namespace Client
 		{
 			if (!std::string(firstNameBuffer).empty() && !std::string(lastNameBuffer).empty() && !std::string(emailBuffer).empty() && !std::string(passwordBuffer).empty() && !std::string(passwordCheckBuffer).empty())
 			{
-				if (std::string(passwordBuffer) == std::string(passwordCheckBuffer))
+				if (!strcmp(passwordBuffer, passwordCheckBuffer))
 				{
 					registerData.FirstName = firstNameBuffer;
 					registerData.LastName = lastNameBuffer;
@@ -521,13 +628,7 @@ namespace Client
 
 					if (std::regex_match(registerData.Email, pattern))
 					{
-						Core::Command command((uint32_t)MessageResponses::CheckEmail);
-						command.SetType(Core::CommandType::Query);
-
-						command.SetCommandString("SELECT email FROM users WHERE email = ?;");
-						command.AddData(new Core::DatabaseString(registerData.Email));
-
-						SendCommandMessage(command);
+						SendCheckEmailMessage(registerData.Email.c_str());
 
 						memset(firstNameBuffer, 0, sizeof(firstNameBuffer));
 						memset(lastNameBuffer, 0, sizeof(lastNameBuffer));
@@ -568,10 +669,10 @@ namespace Client
 	{
 		ImGuiIO& io = ImGui::GetIO();
 
-		// Bools for rendering popups and user page
+		// Bools for rendering popups
 		static bool openCreationPopup = false; // Popup for creating team after clicking on + button
 		static bool openRenamePopup = false; // Popup for renaming team after clicking on Rename button
-		static bool showUserPage = false;
+		static bool openDeletePopup = false; // Popup for deleting team after clicking on Delete button
 		// Bool for automatic messages scroll
 		static bool scrollDown = true;
 
@@ -591,6 +692,13 @@ namespace Client
 		{
 			ImGui::OpenPopup("TeamRename");
 			openRenamePopup = false;
+		}
+
+		// Open delete popup
+		if (openDeletePopup)
+		{
+			ImGui::OpenPopup("TeamDelete");
+			openDeletePopup = false;
 		}
 
 		// Center creation popup if it's open
@@ -621,22 +729,19 @@ namespace Client
 			}
 
 			ImGui::SameLine();
-			if (ImGui::Button("Create"))
+			if (ImGui::Button("Create") && !std::string(teamNameBuffer).empty())
 			{
-				if (!std::string(teamNameBuffer).empty())
-				{
-					Core::Command command((uint32_t)MessageResponses::LinkTeamToUser);
-					command.SetType(Core::CommandType::Command);
+				Core::Command command((uint32_t)MessageResponses::LinkTeamToUser);
+				command.SetType(Core::CommandType::Command);
 
-					command.SetCommandString("INSERT INTO teams (name, owner_id) VALUES (?, ?);");
-					command.AddData(new Core::DatabaseString(teamNameBuffer));
-					command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+				command.SetCommandString("INSERT INTO teams (name, owner_id) VALUES (?, ?);");
+				command.AddData(new Core::DatabaseString(teamNameBuffer));
+				command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
 
-					SendCommandMessage(command);
+				SendCommandMessage(command);
 
-					memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
-					ImGui::CloseCurrentPopup();
-				}
+				memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+				ImGui::CloseCurrentPopup();
 			}
 
 			ImGui::EndPopup();
@@ -683,6 +788,36 @@ namespace Client
 			ImGui::EndPopup();
 		}
 
+		// Center delete popup if it's open
+		if (ImGui::IsPopupOpen("TeamDelete"))
+		{
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+			ImGui::SetNextWindowSize(ImVec2(260.0f, 0.0f));
+		}
+
+		// Render delete popup
+		if (ImGui::BeginPopupModal("TeamDelete", nullptr, flags))
+		{
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("You want to delete this team?").x) / 2);
+			ImGui::Text("You want to delete this team?");
+
+			// Center buttons x position
+			float buttonsWidth = ImGui::CalcTextSize("No").x + ImGui::CalcTextSize("Yes").x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+			if (ImGui::Button("No"))
+				ImGui::CloseCurrentPopup();
+
+			ImGui::SameLine();
+			if (ImGui::Button("Yes"))
+			{
+				DeleteSelectedTeam();
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndPopup();
+		}
+
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 
@@ -719,6 +854,7 @@ namespace Client
 			{
 				showUserPage = false;
 				scrollDown = true;
+				inviteState = InviteState::None;
 				loggedUser.SetSelectedTeam(team);
 				ReadSelectedTeamMessages();
 				ReadSelectedTeamUsers();
@@ -751,11 +887,62 @@ namespace Client
 			ImGui::BeginTabBar("UserPageTabBar");
 			if (ImGui::BeginTabItem("Notifications"))
 			{
+				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 90.0f);
+				if (ImGui::Button("Clear all") && loggedUser.HasNotifications())
+					DeleteAllNotifications();
+
+				ImGui::BeginDisabled();
+				for (Ref<Notification>& notification : loggedUser.GetNotifications())
+				{
+					const char* message = notification->GetMessage();
+
+					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+					ImGui::InputText("##Notification", (char*)message, strlen(message), ImGuiInputTextFlags_ReadOnly);
+				}
+				ImGui::EndDisabled();
+
 				ImGui::EndTabItem();
 			}
 
 			if (ImGui::BeginTabItem("Invites"))
 			{
+				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 100.0f);
+				if (ImGui::Button("Reject all") && loggedUser.HasInvites())
+					DeleteAllInvites();
+
+				for (Ref<Invite>& invite : loggedUser.GetInvites())
+				{
+					const char* teamName = invite->GetTeamName();
+
+					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 170.0f);
+					ImGui::BeginDisabled();
+					ImGui::InputText("##Invite", (char*)teamName, strlen(teamName), ImGuiInputTextFlags_ReadOnly);
+					ImGui::EndDisabled();
+					ImGui::SameLine();
+					if (ImGui::Button("Accept"))
+					{
+						Core::Command command((uint32_t)MessageResponses::None);
+						command.SetType(Core::CommandType::Command);
+
+						command.SetCommandString("INSERT INTO users_teams (user_id, team_id) VALUES (?, ?);");
+						command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+						command.AddData(new Core::DatabaseInt(invite->GetTeamId()));
+
+						SendCommandMessage(command);
+
+						DeleteInvite(invite->GetId());
+					}
+
+					ImGui::SameLine();
+					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+					ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+					if (ImGui::Button("Reject"))
+						DeleteInvite(invite->GetId());
+
+					ImGui::PopStyleColor(3);
+				}
+
 				ImGui::EndTabItem();
 			}
 			ImGui::EndTabBar();
@@ -795,7 +982,7 @@ namespace Client
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
 
 			if (ImGui::Button("Delete"))
-				DeleteSelectedTeam();
+				openDeletePopup = true;
 
 			ImGui::PopStyleColor(3);
 		}
@@ -857,7 +1044,7 @@ namespace Client
 		static char messageBuffer[256] = {};
 		ImGui::SetNextItemWidth(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2);
 		ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 60.0f);
-		if (ImGui::InputText("##MessageInput", messageBuffer, sizeof(messageBuffer), ImGuiInputTextFlags_EnterReturnsTrue))
+		if (ImGui::InputTextWithHint("##MessageInput", "Message...", messageBuffer, sizeof(messageBuffer), ImGuiInputTextFlags_EnterReturnsTrue))
 		{
 			ImGui::SetKeyboardFocusHere(-1);
 			scrollDown = true;
@@ -894,17 +1081,79 @@ namespace Client
 
 		if (ImGui::BeginTabItem("Members"))
 		{
+			static char emailBuffer[256] = {};
+
+			bool IsOwner = loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam());
+			if (IsOwner)
+			{
+				ImGui::SetNextItemWidth(rightSidePanelWidth - (ImGui::GetStyle().WindowPadding.x * 2));
+				ImGui::InputTextWithHint("##AddUser", "Email", emailBuffer, sizeof(emailBuffer));
+
+				if (ImGui::Button("Add user"))
+				{
+					if (strcmp(emailBuffer, loggedUser.GetEmail()))
+						SendCheckEmailMessage(emailBuffer);
+					else
+						inviteState = InviteState::CannotInviteYourself;
+
+					memset(emailBuffer, 0, sizeof(emailBuffer));
+				}
+
+				switch (inviteState)
+				{
+				case Client::InviteState::None:
+					ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
+					break;
+				case Client::InviteState::NotExisting:
+					ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("User with this email does not exists!").x) / 2);
+					ImGui::TextColored(errorColor, "User with this email does not exists!");
+					break;
+				case Client::InviteState::CannotInviteYourself:
+					ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("You can't invite yourself!").x) / 2);
+					ImGui::TextColored(errorColor, "You can't invite yourself!");
+					break;
+				case Client::InviteState::AlreadyInvited:
+					ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("User has already been invited!").x) / 2);
+					ImGui::TextColored(errorColor, "User has already been invited!");
+					break;
+				case Client::InviteState::AlreadyInTeam:
+					ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("User is already in the team!").x) / 2);
+					ImGui::TextColored(errorColor, "User is already in the team!");
+					break;
+				case Client::InviteState::InviteSuccessful:
+					ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Invite has been sent!").x) / 2);
+					ImGui::TextColored(successColor, "Invite has been sent!");
+					break;
+				}
+			}
+
 			for (Ref<User> teamUser : loggedUser.GetSelectedTeam().GetUsers())
 			{
 				ImGui::Text(teamUser->GetName());
+				ImGui::AlignTextToFramePadding();
 
-				if (loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()) && !teamUser->IsTeamOwner(loggedUser.GetSelectedTeam()))
+				if (IsOwner && !teamUser->IsTeamOwner(loggedUser.GetSelectedTeam()))
 				{
 					ImGui::SameLine();
 					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_Button, redButtonActiveColor);
-					ImGui::Button("Remove");
+					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+					ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+
+					if (ImGui::Button("Remove"))
+					{
+						Core::Command command((uint32_t)MessageResponses::None);
+						command.SetType(Core::CommandType::Command);
+
+						command.SetCommandString("DELETE FROM users_teams WHERE user_id = ? AND team_id = ?;");
+						command.AddData(new Core::DatabaseInt(teamUser->GetId()));
+						command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+						SendCommandMessage(command);
+
+						std::string message = "You have been removed from ";
+						message += loggedUser.GetSelectedTeam().GetName();
+						SendNotificationMessage(teamUser->GetId(), message.c_str());
+					}
+
 					ImGui::PopStyleColor(3);
 				}
 			}
@@ -956,6 +1205,7 @@ namespace Client
 		style.FrameRounding = 5.0f;
 		style.FramePadding = ImVec2(12.0f, 10.0f);
 		style.ItemSpacing.y = 13.0f;
+		style.DisabledAlpha = 0.9f;
 
 		// Set ImGui Colors
 		style.Colors[ImGuiCol_WindowBg] = ImVec4{ 0.17862745098039217f ,0.16294117647058825f, 0.2296078431372549f, 1.0f };
@@ -975,6 +1225,7 @@ namespace Client
 		style.Colors[ImGuiCol_Separator] = style.Colors[ImGuiCol_WindowBg];
 
 		style.Colors[ImGuiCol_Tab] = style.Colors[ImGuiCol_Button];
+		style.Colors[ImGuiCol_TabHovered] = style.Colors[ImGuiCol_ButtonActive];
 		style.Colors[ImGuiCol_TabActive] = style.Colors[ImGuiCol_ButtonActive];
 	}
 
@@ -989,13 +1240,48 @@ namespace Client
 		networkInterface->SendMessagePackets(message);
 	}
 
+	void ClientApp::SendCheckEmailMessage(const char* email)
+	{
+		Core::Command command((uint32_t)MessageResponses::CheckEmail);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT id, email FROM users WHERE email = ?;");
+		command.AddData(new Core::DatabaseString(email));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::SendCheckInviteMessage(uint32_t userId)
+	{
+		Core::Command command((uint32_t)MessageResponses::CheckInvite);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT user_id FROM invites WHERE team_id = ? AND user_id = ?;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+		command.AddData(new Core::DatabaseInt(userId));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::SendCheckTeamMessage(uint32_t userId)
+	{
+		Core::Command command((uint32_t)MessageResponses::CheckTeam);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT user_id FROM users_teams WHERE team_id = ? AND user_id = ?;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+		command.AddData(new Core::DatabaseInt(userId));
+
+		SendCommandMessage(command);
+	}
+
 	// Send command to login
 	void ClientApp::SendLoginMessage()
 	{
 		Core::Command command((uint32_t)MessageResponses::Login);
 		command.SetType(Core::CommandType::Query);
 		
-		command.SetCommandString("SELECT id, password, first_name, last_name, role FROM users WHERE email=?;");
+		command.SetCommandString("SELECT id, password, first_name, last_name, email, role FROM users WHERE email=?;");
 		command.AddData(new Core::DatabaseString(loginData.Email.c_str()));
 
 		SendCommandMessage(command);
@@ -1016,6 +1302,17 @@ namespace Client
 		SendCommandMessage(command);
 	}
 
+	void ClientApp::SendNotificationMessage(uint32_t userId, const char* message)
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Command);
+
+		command.SetCommandString("INSERT INTO notifications (user_id, message) VALUES (?, ?);");
+		command.AddData(new Core::DatabaseInt(userId));
+		command.AddData(new Core::DatabaseString(message));
+		SendCommandMessage(command);
+	}
+
 	// Send command to read all logged user's teams
 	void ClientApp::ReadUsersTeams()
 	{
@@ -1023,6 +1320,29 @@ namespace Client
 		command.SetType(Core::CommandType::Query);
 
 		command.SetCommandString("SELECT teams.id, teams.owner_id, teams.name FROM users_teams JOIN teams ON users_teams.team_id = teams.id WHERE users_teams.user_id = ?;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	// Send command to read all logged user's invites
+	void ClientApp::ReadUsersInvites()
+	{
+		Core::Command command((uint32_t)MessageResponses::ProcessInvites);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT invites.id, teams.id, teams.name FROM invites JOIN teams ON invites.team_id = teams.id WHERE invites.user_id = ?;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::ReadUsersNotifications()
+	{
+		Core::Command command((uint32_t)MessageResponses::ProcessNotifications);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT id, message FROM notifications WHERE user_id = ?;");
 		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
 
 		SendCommandMessage(command);
@@ -1052,6 +1372,39 @@ namespace Client
 		SendCommandMessage(command);
 	}
 
+	void ClientApp::DeleteInvite(uint32_t inviteId)
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Command);
+
+		command.SetCommandString("DELETE FROM invites WHERE id = ?;");
+		command.AddData(new Core::DatabaseInt(inviteId));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::DeleteAllInvites()
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Command);
+
+		command.SetCommandString("DELETE FROM invites WHERE user_id = ?;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::DeleteAllNotifications()
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Command);
+
+		command.SetCommandString("DELETE FROM notifications WHERE user_id = ?;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+		SendCommandMessage(command);
+	}
+
 	// Send command to delete selected team
 	void ClientApp::DeleteSelectedTeam()
 	{
@@ -1065,7 +1418,8 @@ namespace Client
 		command.SetCommandString("DELETE FROM messages WHERE team_id = ?;");
 		SendCommandMessage(command);
 
-		// TODO: delete assignments and invites
+		command.SetCommandString("DELETE FROM invites WHERE team_id = ?;");
+		SendCommandMessage(command);
 
 		command.SetCommandString("DELETE FROM teams WHERE id = ?;");
 		SendCommandMessage(command);
