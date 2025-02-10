@@ -2,6 +2,7 @@
 #include "Core/Application.h"
 #include "Networking/NetworkClientInterface.h"
 #include "Networking/MessageQueue.h"
+#include "Client/ErrorTypes.h"
 #include "Client/User.h"
 #include "Database/Command.h"
 
@@ -9,34 +10,6 @@ struct ImFont;
 
 namespace Client
 {
-	// Enum of login error types
-	enum class LoginErrorType
-	{
-		None = 0,
-		NotFilled, // Not filled inputs
-		Incorrect, // Incorrect input
-	};
-
-	// Enum of register error types
-	enum class RegisterErrorType
-	{
-		None = 0,
-		NotFilled, /// Not filled inputs
-		NotMatching, // Not matching passwords
-		WrongFormat, // Email is in wrong format
-		Existing, // Existing email
-	};
-
-	enum class InviteState
-	{
-		None = 0,
-		NotExisting, // User does not exist
-		CannotInviteYourself, // Cannot invite yourself into you team
-		AlreadyInvited, // User has already been invited
-		AlreadyInTeam, // User is already in the team
-		InviteSuccessful, // Invite has been successfully sent
-	};
-
 	// Enum of server response ids (instead of using raw numbers, casting them to uint32 anyway)
 	enum class MessageResponses : uint32_t
 	{
@@ -50,8 +23,11 @@ namespace Client
 		UpdateUsers, // Reserved by server
 		UpdateInvites, // Reserved by server
 		UpdateNotifications, // Reserved by server
+		UpdateLoggedUser,
 		CheckInvite,
 		CheckTeam,
+		ChangeUsername,
+		ChangePassword,
 		ProcessTeams,
 		ProcessTeamMessages,
 		ProcessTeamUsers,
@@ -118,6 +94,8 @@ namespace Client
 		void RenderRegisterWindow(ImGuiWindowFlags flags);
 		void RenderHomeWindow(ImGuiWindowFlags flags);
 
+		void ResetActionStates();
+
 		// Sending methods
 		void SendCommandMessage(Core::Command& command);
 		void SendLoginMessage();
@@ -129,6 +107,7 @@ namespace Client
 		void SendCheckTeamMessage(uint32_t userId); // Check if user is already in the team
 
 		// Reading methods
+		void UpdateLoggedUser();
 		void ReadUsersTeams();
 		void ReadUsersInvites();
 		void ReadUsersNotifications();
@@ -156,8 +135,11 @@ namespace Client
 
 		// Enum for rendering ui windows by the state of application
 		ClientState state = ClientState::None;
-		// State for inviting users into team
-		InviteState inviteState = InviteState::None;
+
+		// Action states
+		InviteState inviteState = InviteState::None; // State for inviting users into team
+		ChangeUsernameState changeUsernameState = ChangeUsernameState::None; // State for changing username
+		ChangePasswordState changePasswordState = ChangePasswordState::None; // State for changing password
 
 		User loggedUser;
 

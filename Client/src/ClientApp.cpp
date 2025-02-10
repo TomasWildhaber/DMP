@@ -234,6 +234,9 @@ namespace Client
 				}
 				case MessageResponses::UpdateUsers: // Update users
 				{
+					if (state == ClientState::Home)
+						UpdateLoggedUser();
+
 					if (loggedUser.HasSelectedTeam())
 						ReadSelectedTeamUsers();
 
@@ -248,6 +251,18 @@ namespace Client
 				case MessageResponses::UpdateNotifications:
 				{
 					ReadUsersNotifications();
+
+					break;
+				}
+				case MessageResponses::UpdateLoggedUser:
+				{
+					loggedUser.SetName(std::string((const char*)response[0].GetValue()) + " " + std::string((const char*)response[1].GetValue()));
+					loggedUser.SetEmail((const char*)response[2].GetValue());
+
+					if (std::string((const char*)response[3].GetValue()) == "user")
+						loggedUser.SetAdminPrivileges(false);
+					else
+						loggedUser.SetAdminPrivileges(true);
 
 					break;
 				}
@@ -268,7 +283,7 @@ namespace Client
 
 					if (!loggedUser.IsSelectedTeamValid())
 					{
-						inviteState = InviteState::None;
+						ResetActionStates();
 
 						if (firstTeam && !showUserPage)
 							loggedUser.SetSelectedTeam(firstTeam);
@@ -338,6 +353,18 @@ namespace Client
 					// Load user notifications
 					for (uint32_t i = 0; i < response.GetDataCount(); i += 2) // Response: id, message
 						loggedUser.AddNotification(new Notification(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue())); // Add notification
+
+					break;
+				}
+				case MessageResponses::ChangeUsername:
+				{
+					changeUsernameState = *(int*)response[0].GetValue() ? ChangeUsernameState::ChangeSuccessful : ChangeUsernameState::Error;
+
+					break;
+				}
+				case MessageResponses::ChangePassword:
+				{
+					changePasswordState = *(int*)response[0].GetValue() ? ChangePasswordState::ChangeSuccessful : ChangePasswordState::Error;
 
 					break;
 				}
@@ -472,15 +499,19 @@ namespace Client
 
 		ImGui::Text("Password");
 		ImGui::SetNextItemWidth(300.0f);
+		// Login when enter pressed
 		if (ImGui::InputText("##Password", passwordBuffer, sizeof(passwordBuffer), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_Password))
 		{
 			// Send login command if inputs are not empty otherwise set loginData.Error
-			if (!std::string(emailBuffer).empty() && !std::string(passwordBuffer).empty())
+			if (strlen(emailBuffer) && strlen(passwordBuffer))
 			{
 				loginData.Email = emailBuffer;
 				loginData.Password = passwordBuffer;
 
 				SendLoginMessage();
+
+				memset(emailBuffer, 0, sizeof(emailBuffer));
+				memset(passwordBuffer, 0, sizeof(passwordBuffer));
 			}
 			else
 				loginData.Error = LoginErrorType::NotFilled;
@@ -491,9 +522,10 @@ namespace Client
 
 		// Render login button
 		ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Log in").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
+		// Login when login button clicked
 		if (ImGui::Button("Log in") && networkInterface->IsConnected())
 		{
-			if (!std::string(emailBuffer).empty() && !std::string(passwordBuffer).empty())
+			if (strlen(emailBuffer) && strlen(passwordBuffer))
 			{
 				loginData.Email = emailBuffer;
 				loginData.Password = passwordBuffer;
@@ -615,7 +647,7 @@ namespace Client
 		ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Create account").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
 		if (ImGui::Button("Create account"))
 		{
-			if (!std::string(firstNameBuffer).empty() && !std::string(lastNameBuffer).empty() && !std::string(emailBuffer).empty() && !std::string(passwordBuffer).empty() && !std::string(passwordCheckBuffer).empty())
+			if (strlen(firstNameBuffer) && strlen(lastNameBuffer) && strlen(emailBuffer) && strlen(passwordBuffer) && strlen(passwordCheckBuffer))
 			{
 				if (!strcmp(passwordBuffer, passwordCheckBuffer))
 				{
@@ -777,7 +809,7 @@ namespace Client
 			ImGui::SameLine();
 			if (ImGui::Button("Rename"))
 			{
-				if (!std::string(teamNameBuffer).empty())
+				if (strlen(teamNameBuffer))
 				{
 					RenameSelectedTeam(teamNameBuffer);
 					memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
@@ -854,7 +886,8 @@ namespace Client
 			{
 				showUserPage = false;
 				scrollDown = true;
-				inviteState = InviteState::None;
+				ResetActionStates();
+
 				loggedUser.SetSelectedTeam(team);
 				ReadSelectedTeamMessages();
 				ReadSelectedTeamUsers();
@@ -878,16 +911,13 @@ namespace Client
 		{
 			ImGui::SetNextWindowBgAlpha(0.0f);
 			ImGui::SetNextWindowPos(ImVec2(leftSidePanelWidth, 0.0f));
-			ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelWidth, io.DisplaySize.y));
-			ImGui::Begin("UserPageWindow", nullptr, flags);
-
-			ImGui::SetNextWindowBgAlpha(0.0f);
-			ImGui::BeginChild("UserPageTabs", ImVec2(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2 - rightSidePanelWidth, ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y * 2));
+			ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelWidth - rightSidePanelWidth, io.DisplaySize.y));
+			ImGui::Begin("UserPageNotifications", nullptr, flags);
 
 			ImGui::BeginTabBar("UserPageTabBar");
 			if (ImGui::BeginTabItem("Notifications"))
 			{
-				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 90.0f);
+				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 110.0f);
 				if (ImGui::Button("Clear all") && loggedUser.HasNotifications())
 					DeleteAllNotifications();
 
@@ -906,7 +936,7 @@ namespace Client
 
 			if (ImGui::BeginTabItem("Invites"))
 			{
-				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 100.0f);
+				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 120.0f);
 				if (ImGui::Button("Reject all") && loggedUser.HasInvites())
 					DeleteAllInvites();
 
@@ -947,10 +977,118 @@ namespace Client
 			}
 			ImGui::EndTabBar();
 
-			ImGui::EndChild();
+			ImGui::End();
 
-			ImGui::SameLine();
-			ImGui::Text("Change username");
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelWidth, 0.0f));
+			ImGui::SetNextWindowSize(ImVec2(rightSidePanelWidth, io.DisplaySize.y));
+
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+
+			ImGui::Begin("UserPageSettings", nullptr, flags);
+
+			ImGui::PopStyleVar();
+			ImGui::Text("Change name");
+			static char firstNameBuffer[256] = {};
+			static char lastNameBuffer[256] = {};
+
+			ImGui::InputTextWithHint("##ChangeFirstName", "First name", firstNameBuffer, sizeof(firstNameBuffer));
+			ImGui::InputTextWithHint("##ChangeLastName", "Last name", lastNameBuffer, sizeof(lastNameBuffer));
+			if (ImGui::Button("Change##name"))
+			{
+				if (strlen(firstNameBuffer) && strlen(lastNameBuffer))
+				{
+					Core::Command command((uint32_t)MessageResponses::ChangeUsername);
+					command.SetType(Core::CommandType::Update);
+
+					command.SetCommandString("UPDATE users set first_name = ?, last_name = ? WHERE id = ?;");
+					command.AddData(new Core::DatabaseString(firstNameBuffer));
+					command.AddData(new Core::DatabaseString(lastNameBuffer));
+					command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+					SendCommandMessage(command);
+
+					memset(firstNameBuffer, 0, sizeof(firstNameBuffer));
+					memset(lastNameBuffer, 0, sizeof(lastNameBuffer));
+				}
+				else
+					changeUsernameState = ChangeUsernameState::NotFilled;
+			}
+
+			switch (changeUsernameState)
+			{
+			case ChangeUsernameState::None:
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
+				break;
+			case ChangeUsernameState::Error:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Somethink went wrong!").x) / 2);
+				ImGui::TextColored(errorColor, "Somethink went wrong!");
+				break;
+			case ChangeUsernameState::NotFilled:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("All inputs must be filled!").x) / 2);
+				ImGui::TextColored(errorColor, "All inputs must be filled!");
+				break;
+			case ChangeUsernameState::ChangeSuccessful:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Name has been changed successfully!").x) / 2);
+				ImGui::TextColored(successColor, "Name has been changed successfully!");
+				break;
+			}
+
+			ImGui::Text("Change password");
+			static char passwordBuffer[256] = {};
+			static char checkPasswordBuffer[256] = {};
+
+			ImGui::InputTextWithHint("##ChangePassword", "New password", passwordBuffer, sizeof(passwordBuffer), ImGuiInputTextFlags_Password);
+			ImGui::InputTextWithHint("##ChangeCheckPassword", "Check password", checkPasswordBuffer, sizeof(checkPasswordBuffer), ImGuiInputTextFlags_Password);
+			if (ImGui::Button("Change##password"))
+			{
+				if (strlen(passwordBuffer) && strlen(checkPasswordBuffer))
+				{
+					if (!strcmp(passwordBuffer, checkPasswordBuffer))
+					{
+						std::string hash = Core::GenerateHash(passwordBuffer);
+
+						Core::Command command((uint32_t)MessageResponses::ChangePassword);
+						command.SetType(Core::CommandType::Update);
+
+						command.SetCommandString("UPDATE users set password = ? WHERE id = ?;");
+						command.AddData(new Core::DatabaseString(hash));
+						command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+						SendCommandMessage(command);
+
+						memset(passwordBuffer, 0, sizeof(passwordBuffer));
+						memset(checkPasswordBuffer, 0, sizeof(checkPasswordBuffer));
+					}
+					else
+						changePasswordState = ChangePasswordState::NotMatching;
+				}
+				else
+					changePasswordState = ChangePasswordState::NotFilled;
+			}
+
+			switch (changePasswordState)
+			{
+			case ChangePasswordState::None:
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
+				break;
+			case ChangePasswordState::Error:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Somethink went wrong!").x) / 2);
+				ImGui::TextColored(errorColor, "Somethink went wrong!");
+				break;
+			case ChangePasswordState::NotFilled:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("All inputs must be filled!").x) / 2);
+				ImGui::TextColored(errorColor, "All inputs must be filled!");
+				break;
+			case ChangePasswordState::NotMatching:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Passwords does not match!").x) / 2);
+				ImGui::TextColored(errorColor, "Passwords does not match!");
+				break;
+			case ChangePasswordState::ChangeSuccessful:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Password has been changed successfully!").x) / 2);
+				ImGui::TextColored(successColor, "Password has been changed successfully!");
+				break;
+			}
+
 			ImGui::End();
 		}
 
@@ -1166,6 +1304,13 @@ namespace Client
 		ImGui::PopStyleVar();
 	}
 
+	void ClientApp::ResetActionStates()
+	{
+		inviteState = InviteState::None;
+		changeUsernameState = ChangeUsernameState::None;
+		changePasswordState = ChangePasswordState::None;
+	}
+
 	void ClientApp::SetStyle()
 	{
 		// Get ImGui objects
@@ -1281,7 +1426,7 @@ namespace Client
 		Core::Command command((uint32_t)MessageResponses::Login);
 		command.SetType(Core::CommandType::Query);
 		
-		command.SetCommandString("SELECT id, password, first_name, last_name, email, role FROM users WHERE email=?;");
+		command.SetCommandString("SELECT id, password, first_name, last_name, email, role FROM users WHERE email = ?;");
 		command.AddData(new Core::DatabaseString(loginData.Email.c_str()));
 
 		SendCommandMessage(command);
@@ -1310,6 +1455,17 @@ namespace Client
 		command.SetCommandString("INSERT INTO notifications (user_id, message) VALUES (?, ?);");
 		command.AddData(new Core::DatabaseInt(userId));
 		command.AddData(new Core::DatabaseString(message));
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::UpdateLoggedUser()
+	{
+		Core::Command command((uint32_t)MessageResponses::UpdateLoggedUser);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT first_name, last_name, email, role FROM users WHERE id = ?;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
 		SendCommandMessage(command);
 	}
 
