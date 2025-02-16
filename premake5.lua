@@ -42,6 +42,7 @@ workspace "DMP"
 group "vendor"
 	include "vendor/glfw"
 	include "vendor/imgui"
+	include "vendor/ImGuiDatePicker"
 group ""
 
 include "Core"

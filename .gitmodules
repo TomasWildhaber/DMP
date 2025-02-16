@@ -10,3 +10,7 @@
 	path = vendor/asio
 	url = https://github.com/TomasWildhaber/asio.git
 	branch = DMP
+[submodule "vendor/ImGuiDatePicker"]
+	path = vendor/ImGuiDatePicker
+	url = https://github.com/TomasWildhaber/ImGuiDatePicker.git
+	branch = DMP

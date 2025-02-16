@@ -206,6 +206,11 @@ namespace Server
 			Core::Response response(5);
 			SendResponseToAllClients(response);
 		}
+		else if (tableName == "assignments" || tableName == "users_assignments")
+		{
+			Core::Response response(10);
+			SendResponseToAllClients(response);
+		}
 		else if (tableName == "invites")
 		{
 			Core::Response response(8);

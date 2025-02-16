@@ -60,7 +60,7 @@ namespace Core
 					item = new DatabaseBool();
 					break;
 				case DatabaseDataType::Timestamp:
-					// item = new DatabaseTimestamp();
+					item = new DatabaseTimestamp();
 					break;
 				}
 

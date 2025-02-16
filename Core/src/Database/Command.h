@@ -82,7 +82,7 @@ namespace Core
 					item = new DatabaseBool();
 					break;
 				case DatabaseDataType::Timestamp:
-					// item = new DatabaseTimestamp();
+					item = new DatabaseTimestamp();
 					break;
 				}
 
@@ -91,7 +91,7 @@ namespace Core
 			}
 		}
 	private:
-		char commandString[256] = {};
+		char commandString[350] = {};
 		CommandType type = CommandType::None;
 	};
 }

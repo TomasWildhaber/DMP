@@ -14,7 +14,7 @@ namespace Core
 		inline const uint32_t GetTaskId() const { return taskId; }
 		inline const uint32_t GetDataCount() const { return data.size(); }
 		inline bool HasData() const { return data.size() != 0; }
-		inline std::vector< Ref<DatabaseData>>& GetData() { return data; }
+		inline std::vector<Ref<DatabaseData>>& GetData() { return data; }
 
 		inline void AddData(Ref<DatabaseData> ref) { data.push_back(ref); }
 

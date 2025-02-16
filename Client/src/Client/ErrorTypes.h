@@ -14,10 +14,19 @@ namespace Client
 	enum class RegisterErrorType
 	{
 		None = 0,
+		Error, // An error occured
 		NotFilled, /// Not filled inputs
 		NotMatching, // Not matching passwords
 		WrongFormat, // Email is in wrong format
 		Existing, // Existing email
+	};
+
+	// Enum of assignment creation error types
+	enum class CreateAssignmentErrorType
+	{
+		None = 0,
+		WrongDate, /// Wrong date selected
+		NoUser, // No users added
 	};
 
 	// Enum of invite states

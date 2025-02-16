@@ -1,5 +1,7 @@
 ﻿#include "pch.h"
 #include <imgui.h>
+
+#include <ImGuiDatePicker.hpp>
 #include "ClientApp.h"
 #include "Core/EntryPoint.h"
 #include "Utils/Buffer.h"
@@ -10,17 +12,25 @@
 
 namespace Client
 {
+	// Global timestamp for assignment creation
+	tm t;
+
 	// Global colors
 	ImVec4 errorColor(0.845098039f, 0.0f, 0.0f, 1.0f);
 	ImVec4 redButtonColor(0.5803921568627451f, 0.0f, 0.0f, 1.0f);
 	ImVec4 redButtonActiveColor(0.4803921568627451f, 0.0f, 0.0f, 1.0f);
 	ImVec4 successColor(0.09411764705882353f, 0.48627450980392156f, 0.09803921568627451f, 1.0f);
 
-	// Global int to store id of invited user
-	uint32_t invitedUserId = 0;
-
 	// Global bools showing user page
 	static bool showUserPage = false;
+
+	// Global assignment data for assignment creation and edit
+	AssignmentData editingAssignmentData;
+	// Global id for deleting assignment
+	static int editAssignmentId = -1;
+
+	// Global int to store id of invited user
+	uint32_t invitedUserId = 0;
 
 	ClientApp::ClientApp(const Core::ApplicationSpecifications& specs) : Core::Application(specs)
 	{
@@ -32,8 +42,7 @@ namespace Client
 		window->SetRenderFunction([this]() { Render(); });
 		SetStyle();
 
-		if (state == ClientState::None)
-			state = ClientState::Login;
+		state = ClientState::Login;
 	}
 
 	void ClientApp::OnEvent(Core::Event& e)
@@ -97,18 +106,18 @@ namespace Client
 				case MessageResponses::Login: // Login
 				{
 					// Response: id, password hash, first name, last name, email, role
-					if (response.HasData() && Core::ValidateHash(loginData.Password.c_str(), (const char*)response[1].GetValue()))
+					if (response.HasData() && Core::ValidateHash(loginData.Password, (const char*)response[1].GetValue()))
 					{
 						loggedUser.SetId(*(int*)response[0].GetValue());
-						loggedUser.SetName(std::string((const char*)response[2].GetValue()) + " " + std::string((const char*)response[3].GetValue()));
+						loggedUser.SetName(std::string((const char*)response[2].GetValue()) + " " + (const char*)response[3].GetValue());
 						loggedUser.SetEmail((const char*)response[4].GetValue());
 
-						if (std::string((const char*)response[5].GetValue()) == "user")
-							loggedUser.SetAdminPrivileges(false);
-						else
+						if (!strcmp((const char*)response[5].GetValue(), "admin"))
 							loggedUser.SetAdminPrivileges(true);
+						else
+							loggedUser.SetAdminPrivileges(false);
 
-						loginData.Error = LoginErrorType::None;
+						loginData = LoginData();
 						state = ClientState::Home;
 
 						ReadUsersTeams();
@@ -118,20 +127,18 @@ namespace Client
 					else
 						loginData.Error = LoginErrorType::Incorrect;
 
-					loginData.Password.clear();
 					break;
 				}
 				case MessageResponses::Register: // Register
 				{
 					if (*(bool*)response[0].GetValue())
 					{
-						registerData.Error = RegisterErrorType::None;
+						registerData = RegisterData();
 						state = ClientState::Login;
 					}
 					else
-						ERROR("Register failed!");
+						registerData.Error = RegisterErrorType::Error;
 
-					registerData.PasswordHash.clear();
 					break;
 				}
 				case MessageResponses::CheckEmail: // Check email
@@ -199,7 +206,7 @@ namespace Client
 
 					break;
 				}
-				case MessageResponses::LinkTeamToUser: // Create user_teams relationship
+				case MessageResponses::LinkTeamToUser: // Create users_teams relationship
 				{
 					if (*(bool*)response[0].GetValue())
 					{
@@ -216,6 +223,30 @@ namespace Client
 					}
 					else
 						ERROR("Team addition failed!");
+
+					break;
+				}
+				case MessageResponses::LinkAssignmentToUser: // Create users_assignments relationship
+				{
+					if (*(bool*)response[0].GetValue())
+					{
+						for (auto& [id, assignmentUser] : editingAssignmentData.GetUsers())
+						{
+							int assignmentId = *(int*)response[1].GetValue();
+
+							Core::Command connectionCommand((uint32_t)MessageResponses::None);
+							connectionCommand.SetType(Core::CommandType::Command);
+
+							connectionCommand.SetCommandString("INSERT INTO users_assignments (user_id, assignment_id) VALUES (?, ?);");
+							connectionCommand.AddData(new Core::DatabaseInt(id));
+							connectionCommand.AddData(new Core::DatabaseInt(assignmentId));
+							SendCommandMessage(connectionCommand);
+						}
+
+						editingAssignmentData = AssignmentData();
+					}
+					else
+						ERROR("Assignment addition failed!");
 
 					break;
 				}
@@ -251,6 +282,13 @@ namespace Client
 				case MessageResponses::UpdateNotifications:
 				{
 					ReadUsersNotifications();
+
+					break;
+				}
+				case MessageResponses::UpdateAssignments:
+				{
+					if (loggedUser.HasSelectedTeam())
+						ReadAssignments();
 
 					break;
 				}
@@ -296,6 +334,7 @@ namespace Client
 					{
 						ReadSelectedTeamMessages();
 						ReadSelectedTeamUsers();
+						ReadAssignments();
 					}
 					
 					break;
@@ -353,6 +392,50 @@ namespace Client
 					// Load user notifications
 					for (uint32_t i = 0; i < response.GetDataCount(); i += 2) // Response: id, message
 						loggedUser.AddNotification(new Notification(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue())); // Add notification
+
+					break;
+				}
+				case MessageResponses::ProcessAssignments:
+				{
+					loggedUser.ClearAssignments();
+
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 8) // Response: id, name, description, data_path, satus, rating, deadline, submitted_at
+					{
+						AssignmentStatus status;
+
+						if (!strcmp((const char*)response[i + 4].GetValue(), "in_progress"))
+							status = AssignmentStatus::InProgress;
+						else if (!strcmp((const char*)response[i + 3].GetValue(), "submitted"))
+							status = AssignmentStatus::Submitted;
+						else
+							status = AssignmentStatus::Failed;
+
+						Ref<Assignment> assignment = new Assignment(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue(), (const char*)response[i + 3].GetValue(), status, 0, *(time_t*)response[i + 6].GetValue(), 0);
+						loggedUser.AddAssignment(*(int*)response[i].GetValue(), assignment); // Add assignment
+						ReadAssignmentsUsers(assignment); // Read assignment's users
+					}
+
+					break;
+				}
+				case MessageResponses::ProcessAssignmentsUsers:
+				{
+					if (response.HasData())
+					{
+						Ref<Assignment> assignment = loggedUser.GetAssignments()[*(int*)response[0].GetValue()];
+						if (assignment)
+						{
+							assignment->ClearUsers();
+
+							for (uint32_t i = 0; i < response.GetDataCount(); i += 4) // Response: assignment id, user id, first_name, last_name
+							{
+								// Construct full name
+								std::string name = std::string((const char*)response[i + 2].GetValue()) + " " + (const char*)response[i + 3].GetValue();
+								// Add user to assignment
+								Ref<User> user = new User(*(int*)response[i + 1].GetValue(), name);
+								assignment->AddUser(user);
+							}
+						}
+					}
 
 					break;
 				}
@@ -456,9 +539,6 @@ namespace Client
 	{
 		ImGuiIO& io = ImGui::GetIO();
 
-		static char emailBuffer[256];
-		static char passwordBuffer[256];
-
 		ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 		ImGui::Begin("Login", nullptr, flags);
 
@@ -495,24 +575,18 @@ namespace Client
 		// Render text inputs
 		ImGui::Text("Email");
 		ImGui::SetNextItemWidth(300.0f);
-		ImGui::InputText("##Email", emailBuffer, sizeof(emailBuffer));
+		ImGui::InputText("##Email", loginData.Email, sizeof(loginData.Email));
 
 		ImGui::Text("Password");
 		ImGui::SetNextItemWidth(300.0f);
 		// Login when enter pressed
-		if (ImGui::InputText("##Password", passwordBuffer, sizeof(passwordBuffer), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_Password))
+		if (ImGui::InputText("##Password", loginData.Password, sizeof(loginData.Password), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_Password))
 		{
+			ImGui::SetKeyboardFocusHere(-1);
+
 			// Send login command if inputs are not empty otherwise set loginData.Error
-			if (strlen(emailBuffer) && strlen(passwordBuffer))
-			{
-				loginData.Email = emailBuffer;
-				loginData.Password = passwordBuffer;
-
+			if (strlen(loginData.Email) && strlen(loginData.Password))
 				SendLoginMessage();
-
-				memset(emailBuffer, 0, sizeof(emailBuffer));
-				memset(passwordBuffer, 0, sizeof(passwordBuffer));
-			}
 			else
 				loginData.Error = LoginErrorType::NotFilled;
 		}
@@ -525,16 +599,8 @@ namespace Client
 		// Login when login button clicked
 		if (ImGui::Button("Log in") && networkInterface->IsConnected())
 		{
-			if (strlen(emailBuffer) && strlen(passwordBuffer))
-			{
-				loginData.Email = emailBuffer;
-				loginData.Password = passwordBuffer;
-
+			if (strlen(loginData.Email) && strlen(loginData.Password))
 				SendLoginMessage();
-
-				memset(emailBuffer, 0, sizeof(emailBuffer));
-				memset(passwordBuffer, 0, sizeof(passwordBuffer));
-			}
 			else
 				loginData.Error = LoginErrorType::NotFilled;
 		}
@@ -548,10 +614,10 @@ namespace Client
 		ImGui::Text("Don't have an account?");
 		ImGui::SameLine();
 
-		// Switch application state and reset previous error if link is clicked
+		// Switch application state and reset login data if link is clicked
 		if (ImGui::TextLink("Create account"))
 		{
-			loginData.Error = LoginErrorType::None;
+			loginData = LoginData();
 			state = ClientState::Register;
 		}
 
@@ -598,6 +664,10 @@ namespace Client
 			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Email is in wrong format!").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
 			ImGui::TextColored(errorColor, "Email is in wrong format!");
 			break;
+		case RegisterErrorType::Error:
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Something went wrong!").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
+			ImGui::TextColored(errorColor, "Something went wrong!");
+			break;
 		}
 
 		ImGui::PopFont();
@@ -617,29 +687,24 @@ namespace Client
 		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 80.0f);
 		ImGui::Text("Last name");
 
-		static char firstNameBuffer[256];
 		ImGui::SetNextItemWidth(145.0f);
-		ImGui::InputText("##First name", firstNameBuffer, sizeof(firstNameBuffer));
+		ImGui::InputText("##First name", registerData.FirstName, sizeof(registerData.FirstName));
 
 		ImGui::SameLine();
-		static char lastNameBuffer[256];
 		ImGui::SetNextItemWidth(145.0f);
-		ImGui::InputText("##Last name", lastNameBuffer, sizeof(lastNameBuffer));
+		ImGui::InputText("##Last name", registerData.LastName, sizeof(registerData.LastName));
 
 		ImGui::Text("Email");
-		static char emailBuffer[256];
 		ImGui::SetNextItemWidth(300.0f);
-		ImGui::InputText("##Email", emailBuffer, sizeof(emailBuffer));
+		ImGui::InputText("##Email", registerData.Email, sizeof(registerData.Email));
 
 		ImGui::Text("Password");
-		static char passwordBuffer[256];
 		ImGui::SetNextItemWidth(300.0f);
-		ImGui::InputText("##Password", passwordBuffer, sizeof(passwordBuffer), ImGuiInputTextFlags_Password);
+		ImGui::InputText("##Password", registerData.Password, sizeof(registerData.Password), ImGuiInputTextFlags_Password);
 
 		ImGui::Text("Confirm password");
-		static char passwordCheckBuffer[256];
 		ImGui::SetNextItemWidth(300.0f);
-		ImGui::InputText("##Confirm password", passwordCheckBuffer, sizeof(passwordCheckBuffer), ImGuiInputTextFlags_Password);
+		ImGui::InputText("##Confirm password", registerData.CheckPassword, sizeof(registerData.CheckPassword), ImGuiInputTextFlags_Password);
 
 		ImGui::PopStyleColor();
 		ImGui::PopFont();
@@ -647,27 +712,14 @@ namespace Client
 		ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Create account").x + ImGui::GetStyle().FramePadding.x * 2.0f) / 2);
 		if (ImGui::Button("Create account"))
 		{
-			if (strlen(firstNameBuffer) && strlen(lastNameBuffer) && strlen(emailBuffer) && strlen(passwordBuffer) && strlen(passwordCheckBuffer))
+			if (strlen(registerData.FirstName) && strlen(registerData.LastName) && strlen(registerData.Email) && strlen(registerData.Password) && strlen(registerData.CheckPassword))
 			{
-				if (!strcmp(passwordBuffer, passwordCheckBuffer))
+				if (!strcmp(registerData.Password, registerData.CheckPassword))
 				{
-					registerData.FirstName = firstNameBuffer;
-					registerData.LastName = lastNameBuffer;
-					registerData.Email = emailBuffer;
-					registerData.PasswordHash = Core::GenerateHash(passwordBuffer);
-
 					static std::regex pattern("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
 
 					if (std::regex_match(registerData.Email, pattern))
-					{
-						SendCheckEmailMessage(registerData.Email.c_str());
-
-						memset(firstNameBuffer, 0, sizeof(firstNameBuffer));
-						memset(lastNameBuffer, 0, sizeof(lastNameBuffer));
-						memset(emailBuffer, 0, sizeof(emailBuffer));
-						memset(passwordBuffer, 0, sizeof(passwordBuffer));
-						memset(passwordCheckBuffer, 0, sizeof(passwordCheckBuffer));
-					}
+						SendCheckEmailMessage(registerData.Email);
 					else
 						registerData.Error = RegisterErrorType::WrongFormat;
 				}
@@ -683,10 +735,10 @@ namespace Client
 
 		ImGui::Text("Already have an account?");
 		ImGui::SameLine();
-		// Switch application state and reset previous error if link is clicked
+		// Switch application state and reset register data if link is clicked
 		if (ImGui::TextLink("Log in"))
 		{
-			registerData.Error = RegisterErrorType::None;
+			registerData = RegisterData();
 			state = ClientState::Login;
 		}
 
@@ -702,154 +754,68 @@ namespace Client
 		ImGuiIO& io = ImGui::GetIO();
 
 		// Bools for rendering popups
-		static bool openCreationPopup = false; // Popup for creating team after clicking on + button
-		static bool openRenamePopup = false; // Popup for renaming team after clicking on Rename button
-		static bool openDeletePopup = false; // Popup for deleting team after clicking on Delete button
+		static bool openTeamCreationPopup = false; // Popup for creating team after clicking on + button
+		static bool openRenameTeamPopup = false; // Popup for renaming team after clicking on Rename button
+		static bool openDeleteTeamPopup = false; // Popup for deleting team after clicking on Delete button
+
+		static bool openAssignmentCreationPopup = false; // Popup for creating assignment after clicking on New assignment button
+		static bool openEditAssignmentPopup = false; // Popup for editing assignment after clicking on Edit button
+		static bool openDeleteAssignmentPopup = false; // Popup for deleting assignment after clicking on Delete button
 		// Bool for automatic messages scroll
 		static bool scrollDown = true;
 
-		// Widths of side panels
-		static float leftSidePanelWidth = 300.0f;
-		static float rightSidePanelWidth = 400.0f;
-
-		// Open creation popup
-		if (openCreationPopup)
+		// Open team creation popup
+		if (openTeamCreationPopup)
 		{
 			ImGui::OpenPopup("TeamCreation");
-			openCreationPopup = false;
+			openTeamCreationPopup = false;
 		}
 
-		// Open rename popup
-		if (openRenamePopup)
+		// Open rename team popup
+		if (openRenameTeamPopup)
 		{
 			ImGui::OpenPopup("TeamRename");
-			openRenamePopup = false;
+			openRenameTeamPopup = false;
 		}
 
-		// Open delete popup
-		if (openDeletePopup)
+		// Open delete team popup
+		if (openDeleteTeamPopup)
 		{
 			ImGui::OpenPopup("TeamDelete");
-			openDeletePopup = false;
+			openDeleteTeamPopup = false;
 		}
 
-		// Center creation popup if it's open
-		if (ImGui::IsPopupOpen("TeamCreation"))
-			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-
-		// Render creation popup
-		if (ImGui::BeginPopupModal("TeamCreation", nullptr, flags))
+		// Open assignment creation popup
+		if (openAssignmentCreationPopup)
 		{
-			static char teamNameBuffer[26] = {}; // Limit team name to 25 characters
-
-			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Create Team").x) / 2);
-			ImGui::Text("Create Team");
-
-			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 20.0f);
-			ImGui::Text("Name");
-			ImGui::SetNextItemWidth(260.0f);
-			ImGui::InputText("##TeamName", teamNameBuffer, sizeof(teamNameBuffer));
-
-			// Center buttons x position
-			float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2;
-			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
-
-			if (ImGui::Button("Cancel"))
-			{
-				memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
-				ImGui::CloseCurrentPopup();
-			}
-
-			ImGui::SameLine();
-			if (ImGui::Button("Create") && !std::string(teamNameBuffer).empty())
-			{
-				Core::Command command((uint32_t)MessageResponses::LinkTeamToUser);
-				command.SetType(Core::CommandType::Command);
-
-				command.SetCommandString("INSERT INTO teams (name, owner_id) VALUES (?, ?);");
-				command.AddData(new Core::DatabaseString(teamNameBuffer));
-				command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
-
-				SendCommandMessage(command);
-
-				memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
-				ImGui::CloseCurrentPopup();
-			}
-
-			ImGui::EndPopup();
+			ImGui::OpenPopup("AssignmentCreation");
+			openAssignmentCreationPopup = false;
 		}
 
-		// Center rename popup if it's open
-		if (ImGui::IsPopupOpen("TeamRename"))
-			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-
-		// Render rename popup
-		if (ImGui::BeginPopupModal("TeamRename", nullptr, flags))
+		// Open delete assignment popup
+		if (openDeleteAssignmentPopup)
 		{
-			static char teamNameBuffer[26] = {}; // Limit team name to 25 characters
-
-			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Rename Team").x) / 2);
-			ImGui::Text("Rename Team");
-
-			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 20.0f);
-			ImGui::Text("Name");
-			ImGui::SetNextItemWidth(260.0f);
-			ImGui::InputText("##TeamName", teamNameBuffer, sizeof(teamNameBuffer));
-
-			// Center buttons x position
-			float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2;
-			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
-
-			if (ImGui::Button("Cancel"))
-			{
-				memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
-				ImGui::CloseCurrentPopup();
-			}
-
-			ImGui::SameLine();
-			if (ImGui::Button("Rename"))
-			{
-				if (strlen(teamNameBuffer))
-				{
-					RenameSelectedTeam(teamNameBuffer);
-					memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
-					ImGui::CloseCurrentPopup();
-				}
-			}
-
-			ImGui::EndPopup();
+			ImGui::OpenPopup("AssignmentDelete");
+			openDeleteAssignmentPopup = false;
 		}
 
-		// Center delete popup if it's open
-		if (ImGui::IsPopupOpen("TeamDelete"))
+		// Open edit assignment popup
+		if (openEditAssignmentPopup)
 		{
-			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-			ImGui::SetNextWindowSize(ImVec2(260.0f, 0.0f));
+			ImGui::OpenPopup("AssignmentEdit");
+			openEditAssignmentPopup = false;
 		}
 
-		// Render delete popup
-		if (ImGui::BeginPopupModal("TeamDelete", nullptr, flags))
-		{
-			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("You want to delete this team?").x) / 2);
-			ImGui::Text("You want to delete this team?");
+		// Render all popup windows
+		RenderCreateTeamPopup(flags);
+		RenderRenameTeamPopup(flags);
+		RenderDeleteTeamPopup(flags);
 
-			// Center buttons x position
-			float buttonsWidth = ImGui::CalcTextSize("No").x + ImGui::CalcTextSize("Yes").x + ImGui::GetStyle().FramePadding.x * 2;
-			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+		RenderCreateAssignmentPopup(flags);
+		RenderEditAssignmentPopup(flags);
+		RenderDeleteAssignmentPopup(flags);
 
-			if (ImGui::Button("No"))
-				ImGui::CloseCurrentPopup();
-
-			ImGui::SameLine();
-			if (ImGui::Button("Yes"))
-			{
-				DeleteSelectedTeam();
-				ImGui::CloseCurrentPopup();
-			}
-
-			ImGui::EndPopup();
-		}
-
+		// Render Home page
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 
@@ -861,6 +827,13 @@ namespace Client
 		ImGui::BeginChild("Username", ImVec2(ImGui::GetWindowSize().x, 40.0f));
 		ImGui::SetCursorPos(ImVec2(10.0f, 9.0f));
 		ImGui::Text(loggedUser.GetName());
+		
+		// Render notification dot
+		if (loggedUser.HasNotifications())
+		{
+			ImGui::SameLine();
+			ImGui::GetForegroundDrawList()->AddCircleFilled(ImVec2(ImGui::GetCursorPosX() + 2.0f, 15.0f), 5.0f, ImGui::ColorConvertFloat4ToU32(ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)));
+		}
 
 		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered())
 		{
@@ -874,7 +847,7 @@ namespace Client
 		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 1.0f));
 		ImGui::SetCursorPosX(leftSidePanelWidth - 35.0f);
 		if (ImGui::Button("+"))
-			openCreationPopup = true;
+			openTeamCreationPopup = true;
 
 		ImGui::PopStyleVar(2);
 		ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10.0f);
@@ -891,6 +864,7 @@ namespace Client
 				loggedUser.SetSelectedTeam(team);
 				ReadSelectedTeamMessages();
 				ReadSelectedTeamUsers();
+				ReadAssignments();
 			}
 			ImGui::PopID();
 		}
@@ -908,193 +882,15 @@ namespace Client
 		}
 
 		if (showUserPage)
-		{
-			ImGui::SetNextWindowBgAlpha(0.0f);
-			ImGui::SetNextWindowPos(ImVec2(leftSidePanelWidth, 0.0f));
-			ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelWidth - rightSidePanelWidth, io.DisplaySize.y));
-			ImGui::Begin("UserPageNotifications", nullptr, flags);
-
-			ImGui::BeginTabBar("UserPageTabBar");
-			if (ImGui::BeginTabItem("Notifications"))
-			{
-				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 110.0f);
-				if (ImGui::Button("Clear all") && loggedUser.HasNotifications())
-					DeleteAllNotifications();
-
-				ImGui::BeginDisabled();
-				for (Ref<Notification>& notification : loggedUser.GetNotifications())
-				{
-					const char* message = notification->GetMessage();
-
-					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-					ImGui::InputText("##Notification", (char*)message, strlen(message), ImGuiInputTextFlags_ReadOnly);
-				}
-				ImGui::EndDisabled();
-
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Invites"))
-			{
-				ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 120.0f);
-				if (ImGui::Button("Reject all") && loggedUser.HasInvites())
-					DeleteAllInvites();
-
-				for (Ref<Invite>& invite : loggedUser.GetInvites())
-				{
-					const char* teamName = invite->GetTeamName();
-
-					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 170.0f);
-					ImGui::BeginDisabled();
-					ImGui::InputText("##Invite", (char*)teamName, strlen(teamName), ImGuiInputTextFlags_ReadOnly);
-					ImGui::EndDisabled();
-					ImGui::SameLine();
-					if (ImGui::Button("Accept"))
-					{
-						Core::Command command((uint32_t)MessageResponses::None);
-						command.SetType(Core::CommandType::Command);
-
-						command.SetCommandString("INSERT INTO users_teams (user_id, team_id) VALUES (?, ?);");
-						command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
-						command.AddData(new Core::DatabaseInt(invite->GetTeamId()));
-
-						SendCommandMessage(command);
-
-						DeleteInvite(invite->GetId());
-					}
-
-					ImGui::SameLine();
-					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
-					if (ImGui::Button("Reject"))
-						DeleteInvite(invite->GetId());
-
-					ImGui::PopStyleColor(3);
-				}
-
-				ImGui::EndTabItem();
-			}
-			ImGui::EndTabBar();
-
-			ImGui::End();
-
-			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelWidth, 0.0f));
-			ImGui::SetNextWindowSize(ImVec2(rightSidePanelWidth, io.DisplaySize.y));
-
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-
-			ImGui::Begin("UserPageSettings", nullptr, flags);
-
-			ImGui::PopStyleVar();
-			ImGui::Text("Change name");
-			static char firstNameBuffer[256] = {};
-			static char lastNameBuffer[256] = {};
-
-			ImGui::InputTextWithHint("##ChangeFirstName", "First name", firstNameBuffer, sizeof(firstNameBuffer));
-			ImGui::InputTextWithHint("##ChangeLastName", "Last name", lastNameBuffer, sizeof(lastNameBuffer));
-			if (ImGui::Button("Change##name"))
-			{
-				if (strlen(firstNameBuffer) && strlen(lastNameBuffer))
-				{
-					Core::Command command((uint32_t)MessageResponses::ChangeUsername);
-					command.SetType(Core::CommandType::Update);
-
-					command.SetCommandString("UPDATE users set first_name = ?, last_name = ? WHERE id = ?;");
-					command.AddData(new Core::DatabaseString(firstNameBuffer));
-					command.AddData(new Core::DatabaseString(lastNameBuffer));
-					command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
-
-					SendCommandMessage(command);
-
-					memset(firstNameBuffer, 0, sizeof(firstNameBuffer));
-					memset(lastNameBuffer, 0, sizeof(lastNameBuffer));
-				}
-				else
-					changeUsernameState = ChangeUsernameState::NotFilled;
-			}
-
-			switch (changeUsernameState)
-			{
-			case ChangeUsernameState::None:
-				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
-				break;
-			case ChangeUsernameState::Error:
-				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Somethink went wrong!").x) / 2);
-				ImGui::TextColored(errorColor, "Somethink went wrong!");
-				break;
-			case ChangeUsernameState::NotFilled:
-				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("All inputs must be filled!").x) / 2);
-				ImGui::TextColored(errorColor, "All inputs must be filled!");
-				break;
-			case ChangeUsernameState::ChangeSuccessful:
-				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Name has been changed successfully!").x) / 2);
-				ImGui::TextColored(successColor, "Name has been changed successfully!");
-				break;
-			}
-
-			ImGui::Text("Change password");
-			static char passwordBuffer[256] = {};
-			static char checkPasswordBuffer[256] = {};
-
-			ImGui::InputTextWithHint("##ChangePassword", "New password", passwordBuffer, sizeof(passwordBuffer), ImGuiInputTextFlags_Password);
-			ImGui::InputTextWithHint("##ChangeCheckPassword", "Check password", checkPasswordBuffer, sizeof(checkPasswordBuffer), ImGuiInputTextFlags_Password);
-			if (ImGui::Button("Change##password"))
-			{
-				if (strlen(passwordBuffer) && strlen(checkPasswordBuffer))
-				{
-					if (!strcmp(passwordBuffer, checkPasswordBuffer))
-					{
-						std::string hash = Core::GenerateHash(passwordBuffer);
-
-						Core::Command command((uint32_t)MessageResponses::ChangePassword);
-						command.SetType(Core::CommandType::Update);
-
-						command.SetCommandString("UPDATE users set password = ? WHERE id = ?;");
-						command.AddData(new Core::DatabaseString(hash));
-						command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
-
-						SendCommandMessage(command);
-
-						memset(passwordBuffer, 0, sizeof(passwordBuffer));
-						memset(checkPasswordBuffer, 0, sizeof(checkPasswordBuffer));
-					}
-					else
-						changePasswordState = ChangePasswordState::NotMatching;
-				}
-				else
-					changePasswordState = ChangePasswordState::NotFilled;
-			}
-
-			switch (changePasswordState)
-			{
-			case ChangePasswordState::None:
-				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
-				break;
-			case ChangePasswordState::Error:
-				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Somethink went wrong!").x) / 2);
-				ImGui::TextColored(errorColor, "Somethink went wrong!");
-				break;
-			case ChangePasswordState::NotFilled:
-				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("All inputs must be filled!").x) / 2);
-				ImGui::TextColored(errorColor, "All inputs must be filled!");
-				break;
-			case ChangePasswordState::NotMatching:
-				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Passwords does not match!").x) / 2);
-				ImGui::TextColored(errorColor, "Passwords does not match!");
-				break;
-			case ChangePasswordState::ChangeSuccessful:
-				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Password has been changed successfully!").x) / 2);
-				ImGui::TextColored(successColor, "Password has been changed successfully!");
-				break;
-			}
-
-			ImGui::End();
-		}
+			RenderUserPage(flags);
 
 		// Return if user has no selected team
 		if (!loggedUser.HasSelectedTeam())
 			return;
+
+		//
+		// Render selected team
+		//
 
 		// Render messages
 		ImGui::SetNextWindowBgAlpha(0.0f);
@@ -1112,7 +908,7 @@ namespace Client
 			ImGui::SameLine();
 			ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 190.0f);
 			if (ImGui::Button("Rename"))
-				openRenamePopup = true;
+				openRenameTeamPopup = true;
 
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
@@ -1120,7 +916,7 @@ namespace Client
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
 
 			if (ImGui::Button("Delete"))
-				openDeletePopup = true;
+				openDeleteTeamPopup = true;
 
 			ImGui::PopStyleColor(3);
 		}
@@ -1179,7 +975,7 @@ namespace Client
 
 		ImGui::EndChild();
 
-		static char messageBuffer[256] = {};
+		static char messageBuffer[CHAR_BUFFER_SIZE] = {};
 		ImGui::SetNextItemWidth(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2);
 		ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 60.0f);
 		if (ImGui::InputTextWithHint("##MessageInput", "Message...", messageBuffer, sizeof(messageBuffer), ImGuiInputTextFlags_EnterReturnsTrue))
@@ -1214,12 +1010,93 @@ namespace Client
 		ImGui::BeginTabBar("TabBar");
 		if (ImGui::BeginTabItem("Assignments"))
 		{
+			if (loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+			{
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("New assignment").x) / 2);
+				if (ImGui::Button("New assignment"))
+				{
+					openAssignmentCreationPopup = true;
+					// Set global time to current date 23:59:59
+					time_t now =  time(nullptr);
+					t = *localtime(&now);
+					t.tm_hour = 23;
+					t.tm_min = 59;
+					t.tm_sec = 59;
+				}
+			}
+
+			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
+			for (auto& [id, assignment] : loggedUser.GetAssignments())
+			{
+				ImGui::PushID(assignment->GetId());
+				bool assignmentOpened = ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap);
+
+				if (loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+				{
+					ImGui::SameLine();
+					ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 100.0f);
+					if (ImGui::Button("Edit"))
+					{
+						editAssignmentId = id;
+						editingAssignmentData = assignment;
+						std::time_t deadline = assignment->GetDeadLine();
+						t = *std::gmtime(&deadline);
+
+						openEditAssignmentPopup = true;
+					}
+					ImGui::SameLine();
+
+					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+					ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+
+					if (ImGui::Button("Delete"))
+					{
+						editAssignmentId = id;
+						openDeleteAssignmentPopup = true;
+					}
+
+					ImGui::PopStyleColor(3);
+				}
+
+				if (assignmentOpened)
+				{
+					ImGui::BeginDisabled();
+					ImGui::Text("Description");
+					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+					ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+
+					ImGui::Text("Assigned users");
+					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+					if (ImGui::BeginListBox("##UserListbox", ImVec2(0.0f, 65.0f)))
+					{
+						for (auto& [id, assignmentUser] : assignment->GetUsers())
+							ImGui::Text(assignmentUser->GetName());
+
+						ImGui::EndListBox();
+					}
+
+					// Parse deadline to char array
+					std::time_t deadline = assignment->GetDeadLine();
+					std::tm* deadlineTime = std::localtime(&deadline);
+					char deadlineStr[32];
+					std::strftime(deadlineStr, 32, "%d.%m.%Y %H:%M:%S", deadlineTime); // Format: 13.06.2025 23:59:59
+
+					ImGui::Text("Deadline");
+					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+					ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
+					ImGui::EndDisabled();
+				}
+				ImGui::PopID();
+			}
+			ImGui::PopStyleVar();
+
 			ImGui::EndTabItem();
 		}
 
 		if (ImGui::BeginTabItem("Members"))
 		{
-			static char emailBuffer[256] = {};
+			static char emailBuffer[CHAR_BUFFER_SIZE] = {};
 
 			bool IsOwner = loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam());
 			if (IsOwner)
@@ -1302,6 +1179,585 @@ namespace Client
 
 		ImGui::End();
 		ImGui::PopStyleVar();
+	}
+
+	void ClientApp::RenderCreateTeamPopup(ImGuiWindowFlags flags)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// Center team creation popup if it's open
+		if (ImGui::IsPopupOpen("TeamCreation"))
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+		// Render team creation popup
+		if (ImGui::BeginPopupModal("TeamCreation", nullptr, flags))
+		{
+			static char teamNameBuffer[26] = {}; // Limit team name to 25 characters
+
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Create Team").x) / 2);
+			ImGui::Text("Create Team");
+
+			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 20.0f);
+			ImGui::Text("Name");
+			ImGui::SetNextItemWidth(260.0f);
+			ImGui::InputText("##TeamName", teamNameBuffer, sizeof(teamNameBuffer));
+
+			// Center buttons x position
+			float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+			if (ImGui::Button("Cancel"))
+			{
+				memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Create") && !std::string(teamNameBuffer).empty())
+			{
+				Core::Command command((uint32_t)MessageResponses::LinkTeamToUser);
+				command.SetType(Core::CommandType::Command);
+
+				command.SetCommandString("INSERT INTO teams (name, owner_id) VALUES (?, ?);");
+				command.AddData(new Core::DatabaseString(teamNameBuffer));
+				command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+				SendCommandMessage(command);
+
+				memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
+	void ClientApp::RenderRenameTeamPopup(ImGuiWindowFlags flags)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// Center rename popup if it's open
+		if (ImGui::IsPopupOpen("TeamRename"))
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+		// Render rename popup
+		if (ImGui::BeginPopupModal("TeamRename", nullptr, flags))
+		{
+			static char teamNameBuffer[26] = {}; // Limit team name to 25 characters
+
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Rename Team").x) / 2);
+			ImGui::Text("Rename Team");
+
+			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 20.0f);
+			ImGui::Text("Name");
+			ImGui::SetNextItemWidth(260.0f);
+			ImGui::InputText("##TeamName", teamNameBuffer, sizeof(teamNameBuffer));
+
+			// Center buttons x position
+			float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Rename").x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+			if (ImGui::Button("Cancel"))
+			{
+				memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Rename"))
+			{
+				if (strlen(teamNameBuffer))
+				{
+					RenameSelectedTeam(teamNameBuffer);
+					memset(teamNameBuffer, 0, sizeof(teamNameBuffer));
+					ImGui::CloseCurrentPopup();
+				}
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
+	void ClientApp::RenderDeleteTeamPopup(ImGuiWindowFlags flags)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// Center delete team popup if it's open
+		if (ImGui::IsPopupOpen("TeamDelete"))
+		{
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+			ImGui::SetNextWindowSize(ImVec2(260.0f, 0.0f));
+		}
+
+		// Render delete team popup
+		if (ImGui::BeginPopupModal("TeamDelete", nullptr, flags))
+		{
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("You want to delete this team?").x) / 2);
+			ImGui::Text("You want to delete this team?");
+
+			// Center buttons x position
+			float buttonsWidth = ImGui::CalcTextSize("No").x + ImGui::CalcTextSize("Yes").x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+			if (ImGui::Button("No"))
+				ImGui::CloseCurrentPopup();
+
+			ImGui::SameLine();
+			if (ImGui::Button("Yes"))
+			{
+				DeleteSelectedTeam();
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
+	void ClientApp::RenderCreateAssignmentPopup(ImGuiWindowFlags flags)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// Center assignment creation popup if it's open
+		if (ImGui::IsPopupOpen("AssignmentCreation"))
+		{
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+			ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f));
+		}
+
+		// Render assignment creation popup
+		if (ImGui::BeginPopupModal("AssignmentCreation", nullptr, flags))
+		{
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Create assignment").x) / 2);
+			ImGui::Text("Create assignment");
+
+			ImGui::Text("Name");
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+			ImGui::InputText("##Name", editingAssignmentData.GetName(), editingAssignmentData.GetNameSize());
+
+			ImGui::Text("Description");
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+			ImGui::InputTextMultiline("##Description", editingAssignmentData.GetDescription(), editingAssignmentData.GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+
+			ImGui::Text("Users");
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+			if (ImGui::BeginCombo("##AddUserCombo", nullptr))
+			{
+				for (Ref<User> teamUser : loggedUser.GetSelectedTeam().GetUsers())
+				{
+					ImGui::PushID(teamUser->GetId());
+					if (ImGui::Selectable(teamUser->GetName()))
+						editingAssignmentData.AddUser(teamUser);
+					ImGui::PopID();
+				}
+
+				ImGui::EndCombo();
+			}
+
+			int removedUserId = -1;
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+			ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+
+			// Render users in assignment
+			uint32_t i = 0;
+			for (auto& [id, assignmentUser] : editingAssignmentData.GetUsers())
+			{
+				float windowRightBorder = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+				float buttonSize = ImGui::CalcItemWidth();
+				float lastButtonPos = ImGui::GetItemRectMin().x;
+				float nextButtonPos = lastButtonPos + ImGui::GetStyle().ItemSpacing.x + buttonSize;
+
+				if (i != 0 && nextButtonPos < windowRightBorder)
+					ImGui::SameLine();
+
+				ImGui::PushID(assignmentUser->GetId());
+				if (ImGui::Button(assignmentUser->GetName()))
+					removedUserId = assignmentUser->GetId();
+				ImGui::PopID();
+
+				i++;
+			}
+			ImGui::PopStyleColor(2);
+
+			// Remove user from assignment outside loop
+			if (removedUserId != -1)
+			{
+				editingAssignmentData.RemoveUser(removedUserId);
+				removedUserId = -1;
+			}
+
+			ImGui::Text("Deadline");
+			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+
+			ImGui::DatePicker("##Deadline", t);
+			ImGui::PopStyleVar();
+
+			switch (createAssignmentError)
+			{
+			case Client::CreateAssignmentErrorType::None:
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
+				break;
+			case Client::CreateAssignmentErrorType::WrongDate:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Date has to be in the future!").x) / 2);
+				ImGui::TextColored(errorColor, "Date has to be in the future!");
+				break;
+			case Client::CreateAssignmentErrorType::NoUser:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("No user added!").x) / 2);
+				ImGui::TextColored(errorColor, "No user added!");
+				break;
+			}
+
+			// Center buttons x position
+			float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+			if (ImGui::Button("Cancel"))
+			{
+				createAssignmentError = CreateAssignmentErrorType::None;
+				editingAssignmentData = AssignmentData();
+
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Create"))
+			{
+				if (editingAssignmentData.GetUserCount())
+				{
+					std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+					std::time_t now_t = std::chrono::system_clock::to_time_t(now);
+
+					if (std::difftime(mktime(&t), now_t) > 0)
+					{
+						Core::Command command((uint32_t)MessageResponses::LinkAssignmentToUser);
+						command.SetType(Core::CommandType::Command);
+
+						command.SetCommandString("INSERT INTO assignments (team_id, name, description, deadline) VALUES (?, ?, ?, ?);");
+						command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+						command.AddData(new Core::DatabaseString(editingAssignmentData.GetName()));
+						command.AddData(new Core::DatabaseString(editingAssignmentData.GetDescription()));
+						command.AddData(new Core::DatabaseTimestamp(mktime(&t)));
+						SendCommandMessage(command);
+
+						ImGui::CloseCurrentPopup();
+					}
+					else
+						createAssignmentError = CreateAssignmentErrorType::WrongDate;
+				}
+				else
+					createAssignmentError = CreateAssignmentErrorType::NoUser;
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
+	void ClientApp::RenderEditAssignmentPopup(ImGuiWindowFlags flags)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// Center assignment creation popup if it's open
+		if (ImGui::IsPopupOpen("AssignmentEdit"))
+		{
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+			ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f));
+		}
+
+		// Render assignment creation popup
+		if (ImGui::BeginPopupModal("AssignmentEdit", nullptr, flags))
+		{
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Edit assignment").x) / 2);
+			ImGui::Text("Edit assignment");
+
+			ImGui::Text("Name");
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+			ImGui::InputText("##Name", editingAssignmentData.GetName(), editingAssignmentData.GetNameSize());
+
+			ImGui::Text("Description");
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+			ImGui::InputTextMultiline("##Description", editingAssignmentData.GetDescription(), editingAssignmentData.GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+
+			ImGui::Text("Deadline");
+			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+
+			ImGui::DatePicker("##Deadline", t);
+			ImGui::PopStyleVar();
+
+			switch (createAssignmentError)
+			{
+			case Client::CreateAssignmentErrorType::None:
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
+				break;
+			case Client::CreateAssignmentErrorType::WrongDate:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Date has to be in the future!").x) / 2);
+				ImGui::TextColored(errorColor, "Date has to be in the future!");
+				break;
+			}
+
+			// Center buttons x position
+			float buttonsWidth = ImGui::CalcTextSize("Cancel").x + ImGui::CalcTextSize("Create").x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+			if (ImGui::Button("Cancel"))
+			{
+				createAssignmentError = CreateAssignmentErrorType::None;
+				editingAssignmentData = AssignmentData();
+
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Edit"))
+			{
+				std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+				std::time_t now_t = std::chrono::system_clock::to_time_t(now);
+
+				if (std::difftime(mktime(&t), now_t) > 0)
+				{
+					Core::Command command((uint32_t)MessageResponses::None);
+					command.SetType(Core::CommandType::Update);
+
+					command.SetCommandString("UPDATE assignments set name = ?, description = ?, deadline = ? WHERE id = ?;");
+					command.AddData(new Core::DatabaseString(editingAssignmentData.GetName()));
+					command.AddData(new Core::DatabaseString(editingAssignmentData.GetDescription()));
+					command.AddData(new Core::DatabaseTimestamp(mktime(&t)));
+					command.AddData(new Core::DatabaseInt(editAssignmentId));
+
+					SendCommandMessage(command);
+
+					editingAssignmentData = AssignmentData();
+					ImGui::CloseCurrentPopup();
+				}
+				else
+					createAssignmentError = CreateAssignmentErrorType::WrongDate;
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
+	void ClientApp::RenderDeleteAssignmentPopup(ImGuiWindowFlags flags)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// Center delete assignment popup if it's open
+		if (ImGui::IsPopupOpen("AssignmentDelete"))
+		{
+			ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+			ImGui::SetNextWindowSize(ImVec2(300.0f, 0.0f));
+		}
+
+		// Render delete assignment popup
+		if (ImGui::BeginPopupModal("AssignmentDelete", nullptr, flags))
+		{
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("You want to delete this assignment?").x) / 2);
+			ImGui::Text("You want to delete this assignment?");
+
+			// Center buttons x position
+			float buttonsWidth = ImGui::CalcTextSize("No").x + ImGui::CalcTextSize("Yes").x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - buttonsWidth) / 2);
+
+			if (ImGui::Button("No"))
+				ImGui::CloseCurrentPopup();
+
+			ImGui::SameLine();
+			if (ImGui::Button("Yes"))
+			{
+				DeleteAssignment(editAssignmentId);
+				editAssignmentId = -1;
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
+	void ClientApp::RenderUserPage(ImGuiWindowFlags flags)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		ImGui::SetNextWindowBgAlpha(0.0f);
+		ImGui::SetNextWindowPos(ImVec2(leftSidePanelWidth, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - leftSidePanelWidth - rightSidePanelWidth, io.DisplaySize.y));
+		ImGui::Begin("UserPageNotifications", nullptr, flags);
+
+		ImGui::BeginTabBar("UserPageTabBar");
+		if (ImGui::BeginTabItem("Notifications"))
+		{
+			ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 110.0f);
+			if (ImGui::Button("Clear all") && loggedUser.HasNotifications())
+				DeleteAllNotifications();
+
+			ImGui::BeginDisabled();
+			for (Ref<Notification>& notification : loggedUser.GetNotifications())
+			{
+				const char* message = notification->GetMessage();
+
+				ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+				ImGui::InputText("##Notification", (char*)message, strlen(message), ImGuiInputTextFlags_ReadOnly);
+			}
+			ImGui::EndDisabled();
+
+			ImGui::EndTabItem();
+		}
+
+		if (ImGui::BeginTabItem("Invites"))
+		{
+			ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 120.0f);
+			if (ImGui::Button("Reject all") && loggedUser.HasInvites())
+				DeleteAllInvites();
+
+			for (Ref<Invite>& invite : loggedUser.GetInvites())
+			{
+				const char* teamName = invite->GetTeamName();
+
+				ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 170.0f);
+				ImGui::BeginDisabled();
+				ImGui::InputText("##Invite", (char*)teamName, strlen(teamName), ImGuiInputTextFlags_ReadOnly);
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				if (ImGui::Button("Accept"))
+				{
+					Core::Command command((uint32_t)MessageResponses::None);
+					command.SetType(Core::CommandType::Command);
+
+					command.SetCommandString("INSERT INTO users_teams (user_id, team_id) VALUES (?, ?);");
+					command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+					command.AddData(new Core::DatabaseInt(invite->GetTeamId()));
+
+					SendCommandMessage(command);
+
+					DeleteInvite(invite->GetId());
+				}
+
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+				ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+				if (ImGui::Button("Reject"))
+					DeleteInvite(invite->GetId());
+
+				ImGui::PopStyleColor(3);
+			}
+
+			ImGui::EndTabItem();
+		}
+		ImGui::EndTabBar();
+
+		ImGui::End();
+
+		ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - rightSidePanelWidth, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(rightSidePanelWidth, io.DisplaySize.y));
+
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+
+		ImGui::Begin("UserPageSettings", nullptr, flags);
+
+		ImGui::PopStyleVar();
+		ImGui::Text("Change name");
+		static char firstNameBuffer[CHAR_BUFFER_SIZE] = {};
+		static char lastNameBuffer[CHAR_BUFFER_SIZE] = {};
+
+		ImGui::InputTextWithHint("##ChangeFirstName", "First name", firstNameBuffer, sizeof(firstNameBuffer));
+		ImGui::InputTextWithHint("##ChangeLastName", "Last name", lastNameBuffer, sizeof(lastNameBuffer));
+		if (ImGui::Button("Change##name"))
+		{
+			if (strlen(firstNameBuffer) && strlen(lastNameBuffer))
+			{
+				Core::Command command((uint32_t)MessageResponses::ChangeUsername);
+				command.SetType(Core::CommandType::Update);
+
+				command.SetCommandString("UPDATE users set first_name = ?, last_name = ? WHERE id = ?;");
+				command.AddData(new Core::DatabaseString(firstNameBuffer));
+				command.AddData(new Core::DatabaseString(lastNameBuffer));
+				command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+				SendCommandMessage(command);
+
+				memset(firstNameBuffer, 0, sizeof(firstNameBuffer));
+				memset(lastNameBuffer, 0, sizeof(lastNameBuffer));
+			}
+			else
+				changeUsernameState = ChangeUsernameState::NotFilled;
+		}
+
+		switch (changeUsernameState)
+		{
+		case ChangeUsernameState::None:
+			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
+			break;
+		case ChangeUsernameState::Error:
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Something went wrong!").x) / 2);
+			ImGui::TextColored(errorColor, "Something went wrong!");
+			break;
+		case ChangeUsernameState::NotFilled:
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("All inputs must be filled!").x) / 2);
+			ImGui::TextColored(errorColor, "All inputs must be filled!");
+			break;
+		case ChangeUsernameState::ChangeSuccessful:
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Name has been changed successfully!").x) / 2);
+			ImGui::TextColored(successColor, "Name has been changed successfully!");
+			break;
+		}
+
+		ImGui::Text("Change password");
+		static char passwordBuffer[CHAR_BUFFER_SIZE] = {};
+		static char checkPasswordBuffer[CHAR_BUFFER_SIZE] = {};
+
+		ImGui::InputTextWithHint("##ChangePassword", "New password", passwordBuffer, sizeof(passwordBuffer), ImGuiInputTextFlags_Password);
+		ImGui::InputTextWithHint("##ChangeCheckPassword", "Check password", checkPasswordBuffer, sizeof(checkPasswordBuffer), ImGuiInputTextFlags_Password);
+		if (ImGui::Button("Change##password"))
+		{
+			if (strlen(passwordBuffer) && strlen(checkPasswordBuffer))
+			{
+				if (!strcmp(passwordBuffer, checkPasswordBuffer))
+				{
+					std::string hash = Core::GenerateHash(passwordBuffer);
+
+					Core::Command command((uint32_t)MessageResponses::ChangePassword);
+					command.SetType(Core::CommandType::Update);
+
+					command.SetCommandString("UPDATE users set password = ? WHERE id = ?;");
+					command.AddData(new Core::DatabaseString(hash));
+					command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+					SendCommandMessage(command);
+
+					memset(passwordBuffer, 0, sizeof(passwordBuffer));
+					memset(checkPasswordBuffer, 0, sizeof(checkPasswordBuffer));
+				}
+				else
+					changePasswordState = ChangePasswordState::NotMatching;
+			}
+			else
+				changePasswordState = ChangePasswordState::NotFilled;
+		}
+
+		switch (changePasswordState)
+		{
+		case ChangePasswordState::None:
+			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f);
+			break;
+		case ChangePasswordState::Error:
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Somethink went wrong!").x) / 2);
+			ImGui::TextColored(errorColor, "Somethink went wrong!");
+			break;
+		case ChangePasswordState::NotFilled:
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("All inputs must be filled!").x) / 2);
+			ImGui::TextColored(errorColor, "All inputs must be filled!");
+			break;
+		case ChangePasswordState::NotMatching:
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Passwords does not match!").x) / 2);
+			ImGui::TextColored(errorColor, "Passwords does not match!");
+			break;
+		case ChangePasswordState::ChangeSuccessful:
+			ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Password has been changed successfully!").x) / 2);
+			ImGui::TextColored(successColor, "Password has been changed successfully!");
+			break;
+		}
+
+		ImGui::End();
 	}
 
 	void ClientApp::ResetActionStates()
@@ -1427,7 +1883,7 @@ namespace Client
 		command.SetType(Core::CommandType::Query);
 		
 		command.SetCommandString("SELECT id, password, first_name, last_name, email, role FROM users WHERE email = ?;");
-		command.AddData(new Core::DatabaseString(loginData.Email.c_str()));
+		command.AddData(new Core::DatabaseString(loginData.Email));
 
 		SendCommandMessage(command);
 	}
@@ -1442,7 +1898,7 @@ namespace Client
 		command.AddData(new Core::DatabaseString(registerData.FirstName));
 		command.AddData(new Core::DatabaseString(registerData.LastName));
 		command.AddData(new Core::DatabaseString(registerData.Email));
-		command.AddData(new Core::DatabaseString(registerData.PasswordHash));
+		command.AddData(new Core::DatabaseString(Core::GenerateHash(registerData.Password).c_str()));
 
 		SendCommandMessage(command);
 	}
@@ -1493,6 +1949,20 @@ namespace Client
 		SendCommandMessage(command);
 	}
 
+	// Send command to read all logged user's assignments
+	void ClientApp::ReadUsersAssignments()
+	{
+		Core::Command command((uint32_t)MessageResponses::ProcessAssignments);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT assignments.id, assignments.name, assignments.description, assignments.data_path, assignments.status, assignments.rating, assignments.deadline, assignments.submitted_at FROM users_assignments JOIN assignments ON users_assignments.assignment_id = assignments.id WHERE users_assignments.user_id = ? AND assignments.team_id = ? ORDER BY deadline LIMIT 200;");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	// Send command to read all logged user's notifications
 	void ClientApp::ReadUsersNotifications()
 	{
 		Core::Command command((uint32_t)MessageResponses::ProcessNotifications);
@@ -1500,6 +1970,29 @@ namespace Client
 
 		command.SetCommandString("SELECT id, message FROM notifications WHERE user_id = ?;");
 		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	// Send command to read all teams assignments (team owner view)
+	void ClientApp::ReadSelectedTeamAssignments()
+	{
+		Core::Command command((uint32_t)MessageResponses::ProcessAssignments);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT id, name, description, data_path, status, rating, deadline, submitted_at FROM assignments WHERE team_id = ? ORDER BY deadline LIMIT 200");
+		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::ReadAssignmentsUsers(Ref<Assignment> assignment)
+	{
+		Core::Command command((uint32_t)MessageResponses::ProcessAssignmentsUsers);
+		command.SetType(Core::CommandType::Query);
+
+		command.SetCommandString("SELECT assignment_id, users.id, users.first_name, users.last_name FROM users_assignments JOIN users ON users_assignments.user_id = users.id WHERE users_assignments.assignment_id = ?;");
+		command.AddData(new Core::DatabaseInt(assignment->GetId()));
 
 		SendCommandMessage(command);
 	}
@@ -1526,6 +2019,15 @@ namespace Client
 		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
 
 		SendCommandMessage(command);
+	}
+
+	// Read all team's assignments or user's assignments based on team ownership
+	void ClientApp::ReadAssignments()
+	{
+		if (loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+			ReadSelectedTeamAssignments();
+		else
+			ReadUsersAssignments();
 	}
 
 	void ClientApp::DeleteInvite(uint32_t inviteId)
@@ -1561,11 +2063,27 @@ namespace Client
 		SendCommandMessage(command);
 	}
 
+	void ClientApp::DeleteAssignment(uint32_t assignmentId)
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Command);
+
+		command.AddData(new Core::DatabaseInt(assignmentId));
+		command.SetCommandString("DELETE FROM users_assignments WHERE assignment_id = ?;");
+		SendCommandMessage(command);
+
+		command.SetCommandString("DELETE FROM assignments WHERE id = ?;");
+		SendCommandMessage(command);
+	}
+
 	// Send command to delete selected team
 	void ClientApp::DeleteSelectedTeam()
 	{
 		Core::Command command((uint32_t)MessageResponses::None);
 		command.SetType(Core::CommandType::Command);
+
+		for (auto& [id, assignment] : loggedUser.GetAssignments())
+			DeleteAssignment(id);
 
 		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
 		command.SetCommandString("DELETE FROM users_teams WHERE team_id = ?;");

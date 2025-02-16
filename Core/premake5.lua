@@ -34,6 +34,7 @@ project "Core"
 		"$(SolutionDir)vendor/Bcrypt/bcrypt.lib",
 		"GLFW",
 		"ImGui",
+		"ImGuiDatePicker",
 	}
 
 	defines { "CORE", "STATIC_CONCPP" }

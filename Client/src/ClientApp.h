@@ -5,6 +5,9 @@
 #include "Client/ErrorTypes.h"
 #include "Client/User.h"
 #include "Database/Command.h"
+#include "Client/Assignment.h"
+
+#define CHAR_BUFFER_SIZE 256
 
 struct ImFont;
 
@@ -23,6 +26,8 @@ namespace Client
 		UpdateUsers, // Reserved by server
 		UpdateInvites, // Reserved by server
 		UpdateNotifications, // Reserved by server
+		UpdateAssignments, // Reserved by server
+		LinkAssignmentToUser,
 		UpdateLoggedUser,
 		CheckInvite,
 		CheckTeam,
@@ -33,6 +38,8 @@ namespace Client
 		ProcessTeamUsers,
 		ProcessInvites,
 		ProcessNotifications,
+		ProcessAssignments,
+		ProcessAssignmentsUsers,
 	};
 
 	// Enum for rendering client states - rendering different windows based on state
@@ -47,18 +54,19 @@ namespace Client
 	// Struct for saving data from login form
 	struct LoginData
 	{
-		std::string Email;
-		std::string Password;
+		char Email[CHAR_BUFFER_SIZE] = {};
+		char Password[CHAR_BUFFER_SIZE] = {};
 		LoginErrorType Error = LoginErrorType::None;
 	};
 
 	// Struct for saving data from register form
 	struct RegisterData
 	{
-		std::string FirstName;
-		std::string LastName;
-		std::string Email;
-		std::string PasswordHash;
+		char FirstName[CHAR_BUFFER_SIZE] = {};
+		char LastName[CHAR_BUFFER_SIZE] = {};
+		char Email[CHAR_BUFFER_SIZE] = {};
+		char Password[CHAR_BUFFER_SIZE] = {};
+		char CheckPassword[CHAR_BUFFER_SIZE] = {};
 		RegisterErrorType Error = RegisterErrorType::None;
 	};
 
@@ -90,9 +98,21 @@ namespace Client
 		void SetStyle();
 		void Render();
 
+		// Render windows
 		void RenderLoginWindow(ImGuiWindowFlags flags);
 		void RenderRegisterWindow(ImGuiWindowFlags flags);
 		void RenderHomeWindow(ImGuiWindowFlags flags);
+
+		// Render popup windows
+		void RenderCreateTeamPopup(ImGuiWindowFlags flags);
+		void RenderRenameTeamPopup(ImGuiWindowFlags flags);
+		void RenderDeleteTeamPopup(ImGuiWindowFlags flags);
+
+		void RenderCreateAssignmentPopup(ImGuiWindowFlags flags);
+		void RenderEditAssignmentPopup(ImGuiWindowFlags flags);
+		void RenderDeleteAssignmentPopup(ImGuiWindowFlags flags);
+
+		void RenderUserPage(ImGuiWindowFlags flags);
 
 		void ResetActionStates();
 
@@ -111,13 +131,22 @@ namespace Client
 		void ReadUsersTeams();
 		void ReadUsersInvites();
 		void ReadUsersNotifications();
+
+		void ReadUsersAssignments();
+		void ReadSelectedTeamAssignments();
+		void ReadAssignmentsUsers(Ref<Assignment> assignment);
+
 		void ReadSelectedTeamMessages();
 		void ReadSelectedTeamUsers();
+
+		void ReadAssignments();
 
 		// Modifying methods
 		void DeleteInvite(uint32_t inviteId);
 		void DeleteAllInvites();
 		void DeleteAllNotifications();
+
+		void DeleteAssignment(uint32_t assignmentId);
 
 		void DeleteSelectedTeam();
 		void RenameSelectedTeam(const char* teamName);
@@ -137,6 +166,7 @@ namespace Client
 		ClientState state = ClientState::None;
 
 		// Action states
+		CreateAssignmentErrorType createAssignmentError = CreateAssignmentErrorType::None; // Error for creating assignment
 		InviteState inviteState = InviteState::None; // State for inviting users into team
 		ChangeUsernameState changeUsernameState = ChangeUsernameState::None; // State for changing username
 		ChangePasswordState changePasswordState = ChangePasswordState::None; // State for changing password
@@ -146,5 +176,8 @@ namespace Client
 		// For saving data from login and register forms
 		LoginData loginData;
 		RegisterData registerData;
+
+		float leftSidePanelWidth = 300.0f;
+		float rightSidePanelWidth = 400.0f;
 	};
 }

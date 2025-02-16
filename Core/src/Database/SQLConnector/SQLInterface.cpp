@@ -102,7 +102,7 @@ namespace Core
 		{
 			for (uint32_t i = 0; i < metadata->getColumnCount(); i++)
 			{
-				// auto typeName = metadata->getColumnTypeName(i + 1);
+				// auto typeName = metadata->getColumnTypeName(i + 1); // to figure out name of the type
 				int type = metadata->getColumnType(i + 1);
 
 				switch (type)
@@ -116,6 +116,15 @@ namespace Core
 				case 22: // enum
 					response.AddData(new DatabaseString(result->getString(i + 1).c_str()));
 					break;
+				case 17: // timestamp
+				{
+					std::istringstream res(result->getString(i + 1).c_str());
+					std::tm time = {};
+					res >> std::get_time(&time, "%Y-%m-%d %H:%M:%S");
+
+					response.AddData(new DatabaseTimestamp(mktime(&time)));
+					break;
+				}
 				default:
 					ERROR("Unknown SQL data type {0}!", type);
 					break;
@@ -142,7 +151,12 @@ namespace Core
 				statement->setBoolean(i + 1, *(bool*)command[i].GetValue());
 				break;
 			case DatabaseDataType::Timestamp:
-				statement->setDateTime(i + 1, (const char*)command[i].GetValue());
+				// Convert time to string
+				char buffer[20] = {};
+				std::tm* timeInfo = std::localtime((time_t*)command[i].GetValue());
+				strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
+
+				statement->setDateTime(i + 1, buffer);
 				break;
 			}
 		}

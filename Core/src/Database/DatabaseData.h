@@ -79,10 +79,15 @@ namespace Core
 	struct DatabaseTimestamp : public DatabaseData
 	{
 		DatabaseTimestamp() = default;
+		DatabaseTimestamp(time_t time) : Time(time) {}
 
 		static DatabaseDataType GetStaticType() { return DatabaseDataType::Timestamp; }
 		virtual inline const DatabaseDataType GetType() const override { return GetStaticType(); }
-		virtual void* GetValue() override { return nullptr; }
-		// TODO: timestamp
+		virtual void* GetValue() override { return &Time; }
+
+		void Serialize(std::ostream& os) override { os.write(reinterpret_cast<const char*>(&Time), sizeof(Time)); }
+		void Deserialize(std::istream& is) override { is.read(reinterpret_cast<char*>(&Time), sizeof(Time)); }
+		
+		time_t Time;
 	};
 }

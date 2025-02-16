@@ -6,10 +6,14 @@
 
 namespace Client
 {
+	// Assignment class declaration to avoid cyclic header include
+	class Assignment;
+
 	// Wrapper class for user from db
 	class User
 	{
 		using TeamMap = std::unordered_map<int, Ref<Team>>;
+		using AssignmentMap = std::unordered_map<uint32_t, Ref<Assignment>>;
 	public:
 		User() = default;
 		User(uint32_t Id, const std::string& Name) : id(Id), name(Name) {} // light version of user for team list of users
@@ -29,6 +33,9 @@ namespace Client
 
 		inline const bool HasNotifications() const { return notifications.size(); }
 		inline std::vector<Ref<Notification>>& GetNotifications() { return notifications; }
+
+		inline const bool HasAssignments() const { return assignments.size(); }
+		inline AssignmentMap& GetAssignments() { return assignments; }
 
 		// Team methods
 		inline const bool IsSelectedTeamValid() const { return isTeamIdValid(selectedTeamId); }
@@ -59,6 +66,10 @@ namespace Client
 		// Notification array wrappers
 		inline void AddNotification(const Ref<Notification>& notification) { notifications.push_back(notification); }
 		inline void ClearNotifications() { notifications.clear(); }
+
+		// Assignments array wrappers
+		inline void AddAssignment(uint32_t id, const Ref<Assignment>& assignment) { assignments[id] = (assignment); }
+		inline void ClearAssignments() { assignments.clear(); }
 	private:
 		// Method for checking if team id is still valid after recreating team vector
 		inline const bool isTeamIdValid(uint32_t Id) const
@@ -78,8 +89,10 @@ namespace Client
 		bool isAdmin = false;
 		int selectedTeamId = -1; // keep selected team id, to save team selection after reallocation
 
+		TeamMap teams;
 		std::vector<Ref<Invite>> invites;
 		std::vector<Ref<Notification>> notifications;
-		TeamMap teams;
+
+		AssignmentMap assignments;
 	};
 }
