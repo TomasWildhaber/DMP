@@ -16,8 +16,8 @@ namespace Client
 	class Assignment
 	{
 	public:
-		Assignment(uint32_t id, const char* name, const char* desc, const char* data_path, AssignmentStatus status, uint32_t rating, time_t deadline, time_t submitTime)
-			: id(id), name(name), description(desc), status(status), deadline(deadline), submitTime(submitTime) {}
+		Assignment(uint32_t id, const char* name, const char* desc, const char* data_path, AssignmentStatus status, uint32_t rating, const char* rating_desc, time_t deadline, time_t submitTime)
+			: id(id), name(name), description(desc), status(status), rating(rating), rating_description(rating_desc), deadline(deadline), submitTime(submitTime) {}
 
 		inline const uint32_t GetId() const { return id; }
 		inline UserMap& GetUsers() { return users; }
@@ -26,10 +26,17 @@ namespace Client
 		inline const time_t GetDeadLine() const { return deadline; }
 		inline const time_t GetSubmitTime() const { return submitTime; }
 		inline const AssignmentStatus GetStatus() const { return status; }
+
 		inline const char* GetName() const { return name.c_str(); }
 		inline const uint32_t GetNameSize() const { return name.size(); }
+
 		inline const char* GetDescription() const { return description.c_str(); }
 		inline const uint32_t GetDescriptionSize() const { return description.size(); }
+
+		inline const char* GetRatingDescription() const { return rating_description.c_str(); }
+		inline const uint32_t GetRatingDescriptionSize() const { return rating_description.size(); }
+
+		inline const uint32_t GetRating() const { return rating; }
 
 		void SetSubmitTime(time_t Time) { deadline = Time; }
 
@@ -39,11 +46,15 @@ namespace Client
 	private:
 		uint32_t id;
 		UserMap users;
-		std::string description;
+
 		std::string name;
+		std::string description;
+		std::string rating_description;
+		uint32_t rating;
+		AssignmentStatus status = AssignmentStatus::None;
+
 		time_t deadline;
 		time_t submitTime;
-		AssignmentStatus status = AssignmentStatus::None;
 	};
 
 	struct AssignmentData
@@ -89,6 +100,7 @@ namespace Client
 
 		char Name[26] = {};
 		char Description[256] = {};
+		int Rating = 0;
 		time_t DeadLine = time(nullptr);;
 		tm DeadLineTm = *localtime(&DeadLine);;
 		int AssignmentId = -1;

@@ -32,6 +32,7 @@ namespace Client
 		inline std::vector<Ref<Invite>>& GetInvites() { return invites; }
 
 		inline const bool HasNotifications() const { return notifications.size(); }
+		inline const uint32_t GetNotificationCount() const { return notifications.size(); }
 		inline std::vector<Ref<Notification>>& GetNotifications() { return notifications; }
 
 		inline const bool HasAssignments() const { return assignments.size(); }

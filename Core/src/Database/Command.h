@@ -91,7 +91,7 @@ namespace Core
 			}
 		}
 	private:
-		char commandString[350] = {};
+		char commandString[400] = {};
 		CommandType type = CommandType::None;
 	};
 }

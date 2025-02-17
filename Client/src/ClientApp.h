@@ -7,7 +7,8 @@
 #include "Database/Command.h"
 #include "Client/Assignment.h"
 
-#define CHAR_BUFFER_SIZE 256
+#define CHAR_BUFFER_SIZE 256 // Size of char buffers
+#define CHAR_SHORT_BUFFER_SIZE 26 // Size of small char buffers
 
 struct ImFont;
 
@@ -111,6 +112,7 @@ namespace Client
 		void RenderCreateAssignmentPopup(ImGuiWindowFlags flags);
 		void RenderEditAssignmentPopup(ImGuiWindowFlags flags);
 		void RenderDeleteAssignmentPopup(ImGuiWindowFlags flags);
+		void RenderRateAssignmentPopup(ImGuiWindowFlags flags);
 
 		void RenderUserPage(ImGuiWindowFlags flags);
 
