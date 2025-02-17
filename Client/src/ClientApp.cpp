@@ -12,9 +12,6 @@
 
 namespace Client
 {
-	// Global timestamp for assignment creation
-	tm t;
-
 	// Global colors
 	ImVec4 errorColor(0.845098039f, 0.0f, 0.0f, 1.0f);
 	ImVec4 redButtonColor(0.5803921568627451f, 0.0f, 0.0f, 1.0f);
@@ -22,12 +19,10 @@ namespace Client
 	ImVec4 successColor(0.09411764705882353f, 0.48627450980392156f, 0.09803921568627451f, 1.0f);
 
 	// Global bools showing user page
-	static bool showUserPage = false;
+	bool showUserPage = false;
 
 	// Global assignment data for assignment creation and edit
 	AssignmentData editingAssignmentData;
-	// Global id for deleting assignment
-	static int editAssignmentId = -1;
 
 	// Global int to store id of invited user
 	uint32_t invitedUserId = 0;
@@ -242,8 +237,6 @@ namespace Client
 							connectionCommand.AddData(new Core::DatabaseInt(assignmentId));
 							SendCommandMessage(connectionCommand);
 						}
-
-						editingAssignmentData = AssignmentData();
 					}
 					else
 						ERROR("Assignment addition failed!");
@@ -408,9 +401,9 @@ namespace Client
 						else if (!strcmp((const char*)response[i + 3].GetValue(), "submitted"))
 							status = AssignmentStatus::Submitted;
 						else
-							status = AssignmentStatus::Failed;
+							status = AssignmentStatus::Rated;
 
-						Ref<Assignment> assignment = new Assignment(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue(), (const char*)response[i + 3].GetValue(), status, 0, *(time_t*)response[i + 6].GetValue(), 0);
+						Ref<Assignment> assignment = new Assignment(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue(), (const char*)response[i + 3].GetValue(), status, 0, *(time_t*)response[i + 6].GetValue(), *(time_t*)response[i + 7].GetValue());
 						loggedUser.AddAssignment(*(int*)response[i].GetValue(), assignment); // Add assignment
 						ReadAssignmentsUsers(assignment); // Read assignment's users
 					}
@@ -892,6 +885,8 @@ namespace Client
 		// Render selected team
 		//
 
+		bool isTeamOwner = loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam());
+
 		// Render messages
 		ImGui::SetNextWindowBgAlpha(0.0f);
 		ImGui::SetNextWindowPos(ImVec2(leftSidePanelWidth, 0.0f));
@@ -903,7 +898,7 @@ namespace Client
 		ImGui::PopFont();
 
 		// Render rename and delete buttons if user is owner of selected team
-		if (loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+		if (isTeamOwner)
 		{
 			ImGui::SameLine();
 			ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 190.0f);
@@ -1010,84 +1005,214 @@ namespace Client
 		ImGui::BeginTabBar("TabBar");
 		if (ImGui::BeginTabItem("Assignments"))
 		{
-			if (loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+			if (isTeamOwner)
 			{
 				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("New assignment").x) / 2);
 				if (ImGui::Button("New assignment"))
 				{
 					openAssignmentCreationPopup = true;
-					// Set global time to current date 23:59:59
-					time_t now =  time(nullptr);
-					t = *localtime(&now);
-					t.tm_hour = 23;
-					t.tm_min = 59;
-					t.tm_sec = 59;
+					editingAssignmentData = AssignmentData();
 				}
 			}
 
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
-			for (auto& [id, assignment] : loggedUser.GetAssignments())
+			if (ImGui::TreeNodeEx("Current assignments", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen))
 			{
-				ImGui::PushID(assignment->GetId());
-				bool assignmentOpened = ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap);
-
-				if (loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam()))
+				for (auto& [id, assignment] : loggedUser.GetAssignments())
 				{
-					ImGui::SameLine();
-					ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 100.0f);
-					if (ImGui::Button("Edit"))
+					if (assignment->GetStatus() == AssignmentStatus::InProgress)
 					{
-						editAssignmentId = id;
-						editingAssignmentData = assignment;
-						std::time_t deadline = assignment->GetDeadLine();
-						t = *std::gmtime(&deadline);
+						ImGui::PushID(assignment->GetId());
+						bool assignmentOpened = ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap);
 
-						openEditAssignmentPopup = true;
+						if (isTeamOwner)
+						{
+							ImGui::SameLine();
+							ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 100.0f);
+							if (ImGui::Button("Edit"))
+							{
+								editingAssignmentData = assignment;
+
+								openEditAssignmentPopup = true;
+							}
+							ImGui::SameLine();
+
+							ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+							ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+							ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+
+							if (ImGui::Button("Delete"))
+							{
+								editingAssignmentData.AssignmentId = id;
+								openDeleteAssignmentPopup = true;
+							}
+
+							ImGui::PopStyleColor(3);
+						}
+
+						if (assignmentOpened)
+						{
+							ImGui::BeginDisabled();
+							ImGui::Text("Description");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+
+							ImGui::Text("Assigned users");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							if (ImGui::BeginListBox("##UserListbox", ImVec2(0.0f, 65.0f)))
+							{
+								for (auto& [id, assignmentUser] : assignment->GetUsers())
+									ImGui::Text(assignmentUser->GetName());
+
+								ImGui::EndListBox();
+							}
+
+							// Parse deadline to char array
+							std::time_t deadline = assignment->GetDeadLine();
+							std::tm* deadlineTime = std::localtime(&deadline);
+							char deadlineStr[32];
+							std::strftime(deadlineStr, 32, "%d.%m.%Y %H:%M:%S", deadlineTime); // Format: 13.06.2025 23:59:59
+
+							ImGui::Text("Deadline");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+
+							bool isAfterDeadline = difftime(deadline, time(nullptr)) <= 0;
+							if (isAfterDeadline)
+								ImGui::PushStyleColor(ImGuiCol_Text, errorColor);
+
+							ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
+							ImGui::EndDisabled();
+
+							if (isAfterDeadline)
+								ImGui::PopStyleColor();
+
+							if (!isTeamOwner)
+							{
+								ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Submit").x) / 2);
+								if (ImGui::Button("Submit"))
+								{
+									Core::Command command((uint32_t)MessageResponses::None);
+									command.SetType(Core::CommandType::Update);
+
+									command.SetCommandString("UPDATE assignments set status = ?, submitted_at = ? WHERE id = ?;");
+									command.AddData(new Core::DatabaseString("submitted"));
+									command.AddData(new Core::DatabaseTimestamp(time(nullptr)));
+									command.AddData(new Core::DatabaseInt(assignment->GetId()));
+
+									SendCommandMessage(command);
+								}
+							}
+						}
+						ImGui::PopID();
 					}
-					ImGui::SameLine();
-
-					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
-
-					if (ImGui::Button("Delete"))
-					{
-						editAssignmentId = id;
-						openDeleteAssignmentPopup = true;
-					}
-
-					ImGui::PopStyleColor(3);
 				}
 
-				if (assignmentOpened)
+				ImGui::TreePop();
+			}
+
+			if (isTeamOwner && ImGui::TreeNodeEx("Submitted assignments", ImGuiTreeNodeFlags_Framed))
+			{
+				for (auto& [id, assignment] : loggedUser.GetAssignments())
 				{
-					ImGui::BeginDisabled();
-					ImGui::Text("Description");
-					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-					ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(0.0f, 100.0f));
-
-					ImGui::Text("Assigned users");
-					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-					if (ImGui::BeginListBox("##UserListbox", ImVec2(0.0f, 65.0f)))
+					if (assignment->GetStatus() == AssignmentStatus::Submitted)
 					{
-						for (auto& [id, assignmentUser] : assignment->GetUsers())
-							ImGui::Text(assignmentUser->GetName());
+						ImGui::PushID(assignment->GetId());
+						if (ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap))
+						{
+							ImGui::BeginDisabled();
+							ImGui::Text("Description");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(0.0f, 100.0f));
 
-						ImGui::EndListBox();
+							ImGui::Text("Assigned users");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							if (ImGui::BeginListBox("##UserListbox", ImVec2(0.0f, 65.0f)))
+							{
+								for (auto& [id, assignmentUser] : assignment->GetUsers())
+									ImGui::Text(assignmentUser->GetName());
+
+								ImGui::EndListBox();
+							}
+
+							// Parse deadline to char array
+							std::time_t deadline = assignment->GetDeadLine();
+							std::tm* deadlineTime = std::localtime(&deadline);
+							char deadlineStr[32];
+							std::strftime(deadlineStr, 32, "%d.%m.%Y %H:%M:%S", deadlineTime); // Format: 13.06.2025 23:59:59
+
+							ImGui::Text("Deadline");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
+							ImGui::EndDisabled();
+
+							ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Rate").x) / 2);
+							ImGui::Button("Rate");
+						}
+						ImGui::PopID();
 					}
-
-					// Parse deadline to char array
-					std::time_t deadline = assignment->GetDeadLine();
-					std::tm* deadlineTime = std::localtime(&deadline);
-					char deadlineStr[32];
-					std::strftime(deadlineStr, 32, "%d.%m.%Y %H:%M:%S", deadlineTime); // Format: 13.06.2025 23:59:59
-
-					ImGui::Text("Deadline");
-					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-					ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
-					ImGui::EndDisabled();
 				}
-				ImGui::PopID();
+
+				ImGui::TreePop();
+			}
+
+			if (ImGui::TreeNodeEx("Rated assignments", ImGuiTreeNodeFlags_Framed))
+			{
+				for (auto& [id, assignment] : loggedUser.GetAssignments())
+				{
+					if (assignment->GetStatus() == AssignmentStatus::Rated)
+					{
+						ImGui::PushID(assignment->GetId());
+						if (ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap))
+						{
+							ImGui::BeginDisabled();
+							ImGui::Text("Description");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+
+							ImGui::Text("Assigned users");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							if (ImGui::BeginListBox("##UserListbox", ImVec2(0.0f, 65.0f)))
+							{
+								for (auto& [id, assignmentUser] : assignment->GetUsers())
+									ImGui::Text(assignmentUser->GetName());
+
+								ImGui::EndListBox();
+							}
+
+							// Parse deadline to char array
+							std::time_t deadline = assignment->GetDeadLine();
+							std::tm* deadlineTime = std::localtime(&deadline);
+							char deadlineStr[32];
+							std::strftime(deadlineStr, 32, "%d.%m.%Y %H:%M:%S", deadlineTime); // Format: 13.06.2025 23:59:59
+
+							ImGui::Text("Deadline");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
+
+							// Parse submmitTime to char array
+							std::time_t submitTime = assignment->GetSubmitTime();
+							std::tm* submitTimeTm = std::localtime(&submitTime);
+							char submitTimeStr[32];
+							std::strftime(submitTimeStr, 32, "%d.%m.%Y %H:%M:%S", submitTimeTm); // Format: 13.06.2025 23:59:59
+
+							ImGui::Text("Submitted");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+
+							bool submitAfterDeadline = difftime(submitTime, deadline) > 0;
+							if (submitAfterDeadline)
+								ImGui::PushStyleColor(ImGuiCol_Text, errorColor);
+
+							ImGui::InputText("##Deadline", submitTimeStr, sizeof(deadlineStr));
+							ImGui::EndDisabled();
+
+							if (submitAfterDeadline)
+								ImGui::PopStyleColor();
+						}
+						ImGui::PopID();
+					}
+				}
+
+				ImGui::TreePop();
 			}
 			ImGui::PopStyleVar();
 
@@ -1098,8 +1223,7 @@ namespace Client
 		{
 			static char emailBuffer[CHAR_BUFFER_SIZE] = {};
 
-			bool IsOwner = loggedUser.IsTeamOwner(loggedUser.GetSelectedTeam());
-			if (IsOwner)
+			if (isTeamOwner)
 			{
 				ImGui::SetNextItemWidth(rightSidePanelWidth - (ImGui::GetStyle().WindowPadding.x * 2));
 				ImGui::InputTextWithHint("##AddUser", "Email", emailBuffer, sizeof(emailBuffer));
@@ -1147,7 +1271,7 @@ namespace Client
 				ImGui::Text(teamUser->GetName());
 				ImGui::AlignTextToFramePadding();
 
-				if (IsOwner && !teamUser->IsTeamOwner(loggedUser.GetSelectedTeam()))
+				if (isTeamOwner && !teamUser->IsTeamOwner(loggedUser.GetSelectedTeam()))
 				{
 					ImGui::SameLine();
 					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
@@ -1332,11 +1456,11 @@ namespace Client
 
 			ImGui::Text("Name");
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-			ImGui::InputText("##Name", editingAssignmentData.GetName(), editingAssignmentData.GetNameSize());
+			ImGui::InputText("##Name", editingAssignmentData.Name, editingAssignmentData.GetNameSize());
 
 			ImGui::Text("Description");
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-			ImGui::InputTextMultiline("##Description", editingAssignmentData.GetDescription(), editingAssignmentData.GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+			ImGui::InputTextMultiline("##Description", editingAssignmentData.Description, editingAssignmentData.GetDescriptionSize(), ImVec2(0.0f, 100.0f));
 
 			ImGui::Text("Users");
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -1373,7 +1497,7 @@ namespace Client
 				if (ImGui::Button(assignmentUser->GetName()))
 					removedUserId = assignmentUser->GetId();
 				ImGui::PopID();
-
+				 
 				i++;
 			}
 			ImGui::PopStyleColor(2);
@@ -1389,7 +1513,8 @@ namespace Client
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
 
-			ImGui::DatePicker("##Deadline", t);
+			if (ImGui::DatePicker("##Deadline", editingAssignmentData.DeadLineTm))
+				editingAssignmentData.UpdateDeadLine();
 			ImGui::PopStyleVar();
 
 			switch (createAssignmentError)
@@ -1424,19 +1549,18 @@ namespace Client
 			{
 				if (editingAssignmentData.GetUserCount())
 				{
-					std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-					std::time_t now_t = std::chrono::system_clock::to_time_t(now);
+					std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
-					if (std::difftime(mktime(&t), now_t) > 0)
+					if (std::difftime(editingAssignmentData.DeadLine, now) > 0)
 					{
 						Core::Command command((uint32_t)MessageResponses::LinkAssignmentToUser);
 						command.SetType(Core::CommandType::Command);
 
 						command.SetCommandString("INSERT INTO assignments (team_id, name, description, deadline) VALUES (?, ?, ?, ?);");
 						command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
-						command.AddData(new Core::DatabaseString(editingAssignmentData.GetName()));
-						command.AddData(new Core::DatabaseString(editingAssignmentData.GetDescription()));
-						command.AddData(new Core::DatabaseTimestamp(mktime(&t)));
+						command.AddData(new Core::DatabaseString(editingAssignmentData.Name));
+						command.AddData(new Core::DatabaseString(editingAssignmentData.Description));
+						command.AddData(new Core::DatabaseTimestamp(editingAssignmentData.DeadLine));
 						SendCommandMessage(command);
 
 						ImGui::CloseCurrentPopup();
@@ -1471,17 +1595,18 @@ namespace Client
 
 			ImGui::Text("Name");
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-			ImGui::InputText("##Name", editingAssignmentData.GetName(), editingAssignmentData.GetNameSize());
+			ImGui::InputText("##Name", editingAssignmentData.Name, editingAssignmentData.GetNameSize());
 
 			ImGui::Text("Description");
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-			ImGui::InputTextMultiline("##Description", editingAssignmentData.GetDescription(), editingAssignmentData.GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+			ImGui::InputTextMultiline("##Description", editingAssignmentData.Description, editingAssignmentData.GetDescriptionSize(), ImVec2(0.0f, 100.0f));
 
 			ImGui::Text("Deadline");
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
 
-			ImGui::DatePicker("##Deadline", t);
+			if (ImGui::DatePicker("##Deadline", editingAssignmentData.DeadLineTm))
+				editingAssignmentData.UpdateDeadLine();
 			ImGui::PopStyleVar();
 
 			switch (createAssignmentError)
@@ -1510,19 +1635,18 @@ namespace Client
 			ImGui::SameLine();
 			if (ImGui::Button("Edit"))
 			{
-				std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-				std::time_t now_t = std::chrono::system_clock::to_time_t(now);
+				std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
-				if (std::difftime(mktime(&t), now_t) > 0)
+				if (std::difftime(editingAssignmentData.DeadLine, now) > 0)
 				{
 					Core::Command command((uint32_t)MessageResponses::None);
 					command.SetType(Core::CommandType::Update);
 
 					command.SetCommandString("UPDATE assignments set name = ?, description = ?, deadline = ? WHERE id = ?;");
-					command.AddData(new Core::DatabaseString(editingAssignmentData.GetName()));
-					command.AddData(new Core::DatabaseString(editingAssignmentData.GetDescription()));
-					command.AddData(new Core::DatabaseTimestamp(mktime(&t)));
-					command.AddData(new Core::DatabaseInt(editAssignmentId));
+					command.AddData(new Core::DatabaseString(editingAssignmentData.Name));
+					command.AddData(new Core::DatabaseString(editingAssignmentData.Description));
+					command.AddData(new Core::DatabaseTimestamp(editingAssignmentData.DeadLine));
+					command.AddData(new Core::DatabaseInt(editingAssignmentData.AssignmentId));
 
 					SendCommandMessage(command);
 
@@ -1564,8 +1688,7 @@ namespace Client
 			ImGui::SameLine();
 			if (ImGui::Button("Yes"))
 			{
-				DeleteAssignment(editAssignmentId);
-				editAssignmentId = -1;
+				DeleteAssignment(editingAssignmentData.AssignmentId);
 				ImGui::CloseCurrentPopup();
 			}
 
@@ -1776,7 +1899,7 @@ namespace Client
 		// Allow specific characters
 		ImVector<ImWchar> ranges;
 		ImFontGlyphRangesBuilder builder;
-		builder.AddText((const char*)u8"ášťřňčěžýíéóďúůäëïüöÁŠŤŘŇČĚŽÝÍÉÓĎŮÄËÏÖÜ");
+		builder.AddText((const char*)u8"ášťřňčěžýíéóďúůäëïüöÁŠŤŘŇČĚŽÝÍÉÓĎŮÄËÏÖÜˇ´¨");
 		builder.AddRanges(io.Fonts->GetGlyphRangesCyrillic());
 		builder.BuildRanges(&ranges);
 

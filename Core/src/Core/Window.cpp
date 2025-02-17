@@ -17,6 +17,7 @@ namespace Core
 		ASSERT(glfwGetCurrentContext() != nullptr, "Windows alredy created (multiple windows is not supported yet) => graphics API is initialized!");
 
 		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+		glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 		window = glfwCreateWindow(data.width, data.height, Title, nullptr, nullptr);
 		glfwMakeContextCurrent(window);
 
@@ -33,8 +34,6 @@ namespace Core
 
 		ImGui_ImplOpenGL3_Init();
 		ImGui_ImplGlfw_InitForOpenGL(window, true);
-
-		glEnable(0x809D); // Enable multisampling
 	}
 
 	Window::~Window()
