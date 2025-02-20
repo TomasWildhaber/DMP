@@ -6,17 +6,18 @@ namespace Core
 {
 	enum class MessageType
 	{
-		Text = 0,
-		RawBytes,
 		Command,
 		Response,
+		UploadFile,
+		DownloadFile,
+		ReadFileName,
 	};
 
 	struct MessageHeader
 	{
 		MessageHeader() = default;
 
-		MessageType Type = MessageType::Text;
+		MessageType Type;
 		uint32_t SessionId;
 		uint32_t Size;
 	};
@@ -36,7 +37,7 @@ namespace Core
 		inline const MessageType GetType() const { return Header.Type; }
 
 		template<typename T>
-		void CreateBody(T& content)
+		void CreateBody(const T& content)
 		{
 			Header.Size = sizeof(T);
 			Body.Content = CreateRef<Buffer>(sizeof(T));

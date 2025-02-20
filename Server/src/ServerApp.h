@@ -4,6 +4,7 @@
 #include "Networking/MessageQueue.h"
 #include "Networking/Session.h"
 #include "Database/DatabaseInterface.h"
+#include "Utils/File.h"
 
 namespace Server
 {
@@ -31,6 +32,9 @@ namespace Server
 		void SendResponse(Core::Response& response);
 		void SendResponseToAllClients(Core::Response& response);
 		void SendUpdateResponse(std::string& tableName);
+		void SendFile(File& file);
+
+		std::filesystem::path dir = std::filesystem::current_path() / "Attachments";
 
 		Ref<Core::NetworkServerInterface> networkInterface;
 		std::deque<Ref<Core::Session>> sessions;

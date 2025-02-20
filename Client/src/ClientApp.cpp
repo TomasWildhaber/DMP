@@ -10,8 +10,15 @@
 #include "Database/Response.h"
 #include "Database/Hash.h"
 
+#include "Utils/FileDialog.h"
+#include "Utils/FileReader.h"
+#include "Utils/FileWriter.h"
+
 namespace Client
 {
+	const char* timeFormat = "%d.%m.%Y %H:%M"; // Format: 13.06.2025 23:59
+	std::string downloadFileExtension;
+
 	// Global colors
 	ImVec4 errorColor(0.845098039f, 0.0f, 0.0f, 1.0f);
 	ImVec4 redButtonColor(0.5803921568627451f, 0.0f, 0.0f, 1.0f);
@@ -26,6 +33,15 @@ namespace Client
 
 	// Global int to store id of invited user
 	uint32_t invitedUserId = 0;
+
+	void SetFileExtension(const char* fileName)
+	{
+		const char* dot = strrchr(fileName, '.');
+		if (!dot || dot == fileName)
+			downloadFileExtension = "";
+
+		downloadFileExtension = dot + 1;
+	}
 
 	ClientApp::ClientApp(const Core::ApplicationSpecifications& specs) : Core::Application(specs)
 	{
@@ -101,13 +117,13 @@ namespace Client
 				case MessageResponses::Login: // Login
 				{
 					// Response: id, password hash, first name, last name, email, role
-					if (response.HasData() && Core::ValidateHash(loginData.Password, (const char*)response[1].GetValue()))
+					if (response.HasData() && Core::ValidateHash(loginData.Password, response[1].GetValueCharPtr()))
 					{
-						loggedUser.SetId(*(int*)response[0].GetValue());
-						loggedUser.SetName(std::string((const char*)response[2].GetValue()) + " " + (const char*)response[3].GetValue());
-						loggedUser.SetEmail((const char*)response[4].GetValue());
+						loggedUser.SetId(response[0].GetValue<int>());
+						loggedUser.SetName(std::string(response[2].GetValueCharPtr()) + " " + response[3].GetValueCharPtr());
+						loggedUser.SetEmail(response[4].GetValueCharPtr());
 
-						if (!strcmp((const char*)response[5].GetValue(), "admin"))
+						if (!strcmp(response[5].GetValueCharPtr(), "admin"))
 							loggedUser.SetAdminPrivileges(true);
 						else
 							loggedUser.SetAdminPrivileges(false);
@@ -126,7 +142,7 @@ namespace Client
 				}
 				case MessageResponses::Register: // Register
 				{
-					if (*(bool*)response[0].GetValue())
+					if (response[0].GetValue<bool>())
 					{
 						registerData = RegisterData();
 						state = ClientState::Login;
@@ -146,7 +162,7 @@ namespace Client
 
 						if (response.HasData())
 						{
-							invitedUserId = *(int*)response[0].GetValue();
+							invitedUserId = response[0].GetValue<int>();
 							SendCheckInviteMessage(invitedUserId);
 						}
 						else
@@ -203,9 +219,9 @@ namespace Client
 				}
 				case MessageResponses::LinkTeamToUser: // Create users_teams relationship
 				{
-					if (*(bool*)response[0].GetValue())
+					if (response[0].GetValue<bool>())
 					{
-						int id = *(int*)response[1].GetValue();
+						int id = response[1].GetValue<int>();
 						
 						Core::Command command((uint32_t)MessageResponses::None);
 						command.SetType(Core::CommandType::Command);
@@ -221,22 +237,31 @@ namespace Client
 
 					break;
 				}
-				case MessageResponses::LinkAssignmentToUser: // Create users_assignments relationship
+				case MessageResponses::LinkAssignmentToUser: // Create users_assignments relationship and create it's attachments
 				{
-					if (*(bool*)response[0].GetValue())
+					if (response[0].GetValue<bool>())
 					{
+						int assignmentId = response[1].GetValue<int>();
+
 						for (auto& [id, assignmentUser] : editingAssignmentData.GetUsers())
 						{
-							int assignmentId = *(int*)response[1].GetValue();
+							Core::Command command((uint32_t)MessageResponses::None);
+							command.SetType(Core::CommandType::Command);
 
-							Core::Command connectionCommand((uint32_t)MessageResponses::None);
-							connectionCommand.SetType(Core::CommandType::Command);
-
-							connectionCommand.SetCommandString("INSERT INTO users_assignments (user_id, assignment_id) VALUES (?, ?);");
-							connectionCommand.AddData(new Core::DatabaseInt(id));
-							connectionCommand.AddData(new Core::DatabaseInt(assignmentId));
-							SendCommandMessage(connectionCommand);
+							command.SetCommandString("INSERT INTO users_assignments (user_id, assignment_id) VALUES (?, ?);");
+							command.AddData(new Core::DatabaseInt(id));
+							command.AddData(new Core::DatabaseInt(assignmentId));
+							SendCommandMessage(command);
 						}
+
+						// Create attachments
+						for (Ref<File>& attachment : editingAssignmentData.GetAttachments())
+						{
+							attachment->SetId(assignmentId);
+							SendAttachment(attachment);
+						}
+
+						editingAssignmentData = AssignmentData();
 					}
 					else
 						ERROR("Assignment addition failed!");
@@ -287,10 +312,10 @@ namespace Client
 				}
 				case MessageResponses::UpdateLoggedUser:
 				{
-					loggedUser.SetName(std::string((const char*)response[0].GetValue()) + " " + std::string((const char*)response[1].GetValue()));
-					loggedUser.SetEmail((const char*)response[2].GetValue());
+					loggedUser.SetName(std::string(response[0].GetValueCharPtr()) + " " + std::string(response[1].GetValueCharPtr()));
+					loggedUser.SetEmail(response[2].GetValueCharPtr());
 
-					if (std::string((const char*)response[3].GetValue()) == "user")
+					if (std::string(response[3].GetValueCharPtr()) == "user")
 						loggedUser.SetAdminPrivileges(false);
 					else
 						loggedUser.SetAdminPrivileges(true);
@@ -305,11 +330,11 @@ namespace Client
 					// Load teams
 					for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id , owner_id, name
 					{
-						// Store first team refence
+						// Store first team reference
 						if (i != 0)
-							loggedUser.AddTeam(new Team(*(int*)response[i].GetValue(), *(int*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue())); // Add a team to team vector
+							loggedUser.AddTeam(new Team(response[i].GetValue<int>(), response[i + 1].GetValue<int>(), response[i + 2].GetValueCharPtr())); // Add a team to team vector
 						else
-							firstTeam = loggedUser.AddTeam(new Team(*(int*)response[i].GetValue(), *(int*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue())); // Add a team to team vector and store it's reference
+							firstTeam = loggedUser.AddTeam(new Team(response[i].GetValue<int>(), response[i + 1].GetValue<int>(), response[i + 2].GetValueCharPtr())); // Add a team to team vector and store it's reference
 					}
 
 					if (!loggedUser.IsSelectedTeamValid())
@@ -342,9 +367,9 @@ namespace Client
 						for (uint32_t i = 0; i < response.GetDataCount(); i += 4) // Response: id, content, first name, last name 
 						{
 							// Construct full name
-							std::string name = std::string((const char*)response[i + 2].GetValue()) + " " + (const char*)response[i + 3].GetValue();
+							std::string name = std::string(response[i + 2].GetValueCharPtr()) + " " + response[i + 3].GetValueCharPtr();
 							// Add message
-							loggedUser.GetSelectedTeam().AddMessage(new Message(name.c_str(), (const char*)response[i + 1].GetValue()));
+							loggedUser.GetSelectedTeam().AddMessage(new Message(name.c_str(), response[i + 1].GetValueCharPtr()));
 						}
 					}
 
@@ -360,9 +385,9 @@ namespace Client
 						for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id, first name, last name 
 						{
 							// Construct full name
-							std::string name = std::string((const char*)response[i + 1].GetValue()) + " " + (const char*)response[i + 2].GetValue();
+							std::string name = std::string(response[i + 1].GetValueCharPtr()) + " " + response[i + 2].GetValueCharPtr();
 							// Add user
-							loggedUser.GetSelectedTeam().AddUser(new User(*(int*)response[i].GetValue(), name));
+							loggedUser.GetSelectedTeam().AddUser(new User(response[i].GetValue<int>(), name));
 						}
 					}
 
@@ -374,7 +399,7 @@ namespace Client
 
 					// Load user invites
 					for (uint32_t i = 0; i < response.GetDataCount(); i += 3) // Response: id, team id, team name
-						loggedUser.AddInvite(new Invite(*(int*)response[i].GetValue(), *(int*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue())); // Add invite
+						loggedUser.AddInvite(new Invite(response[i].GetValue<int>(), response[i + 1].GetValue<int>(), response[i + 2].GetValueCharPtr())); // Add invite
 
 					break;
 				}
@@ -384,7 +409,7 @@ namespace Client
 
 					// Load user notifications
 					for (uint32_t i = 0; i < response.GetDataCount(); i += 2) // Response: id, message
-						loggedUser.AddNotification(new Notification(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue())); // Add notification
+						loggedUser.AddNotification(new Notification(response[i].GetValue<int>(), response[i + 1].GetValueCharPtr())); // Add notification
 
 					break;
 				}
@@ -392,20 +417,22 @@ namespace Client
 				{
 					loggedUser.ClearAssignments();
 
-					for (uint32_t i = 0; i < response.GetDataCount(); i += 9) // Response: id, name, description, data_path, satus, rating, rating_description, deadline, submitted_at
+					for (uint32_t i = 0; i < response.GetDataCount(); i += 8) // Response: id, name, description, status, rating, rating_description, deadline, submitted_at
 					{
+						const char* dbStatus = response[i + 3].GetValueCharPtr();
 						AssignmentStatus status;
 
-						if (!strcmp((const char*)response[i + 4].GetValue(), "in_progress"))
+						if (!strcmp(dbStatus, "in_progress"))
 							status = AssignmentStatus::InProgress;
-						else if (!strcmp((const char*)response[i + 4].GetValue(), "submitted"))
+						else if (!strcmp(dbStatus, "submitted"))
 							status = AssignmentStatus::Submitted;
 						else
 							status = AssignmentStatus::Rated;
 
-						Ref<Assignment> assignment = new Assignment(*(int*)response[i].GetValue(), (const char*)response[i + 1].GetValue(), (const char*)response[i + 2].GetValue(), (const char*)response[i + 3].GetValue(), status, *(int*)response[i + 5].GetValue(), (const char*)response[i + 6].GetValue(), *(time_t*)response[i + 7].GetValue(), *(time_t*)response[i + 8].GetValue());
-						loggedUser.AddAssignment(*(int*)response[i].GetValue(), assignment); // Add assignment
+						Ref<Assignment> assignment = new Assignment(response[i].GetValue<int>(), response[i + 1].GetValueCharPtr(), response[i + 2].GetValueCharPtr(), status, response[i + 4].GetValue<int>(), response[i + 5].GetValueCharPtr(), response[i + 6].GetValue<time_t>(), response[i + 7].GetValue<time_t>());
+						loggedUser.AddAssignment(response[i].GetValue<int>(), assignment); // Add assignment
 						ReadAssignmentsUsers(assignment); // Read assignment's users
+						ReadAssignmentsAttachments(assignment); // Read assignment's attachments
 					}
 
 					break;
@@ -414,7 +441,7 @@ namespace Client
 				{
 					if (response.HasData())
 					{
-						Ref<Assignment> assignment = loggedUser.GetAssignments()[*(int*)response[0].GetValue()];
+						Ref<Assignment> assignment = loggedUser.GetAssignments()[response[0].GetValue<int>()];
 						if (assignment)
 						{
 							assignment->ClearUsers();
@@ -422,9 +449,9 @@ namespace Client
 							for (uint32_t i = 0; i < response.GetDataCount(); i += 4) // Response: assignment id, user id, first_name, last_name
 							{
 								// Construct full name
-								std::string name = std::string((const char*)response[i + 2].GetValue()) + " " + (const char*)response[i + 3].GetValue();
+								std::string name = std::string(response[i + 2].GetValueCharPtr()) + " " + response[i + 3].GetValueCharPtr();
 								// Add user to assignment
-								Ref<User> user = new User(*(int*)response[i + 1].GetValue(), name);
+								Ref<User> user = new User(response[i + 1].GetValue<int>(), name);
 								assignment->AddUser(user);
 							}
 						}
@@ -432,19 +459,41 @@ namespace Client
 
 					break;
 				}
+				case MessageResponses::ProcessAssignmentAttachments:
+				{
+					if (response.HasData())
+					{
+						Ref<Assignment> assignment = loggedUser.GetAssignments()[response[0].GetValue<int>()];
+						if (assignment)
+						{
+							assignment->ClearAttachments();
+
+							for (uint32_t i = 0; i < response.GetDataCount(); i += 4) // Response: assignment id, attachment id, file name, by_user
+								assignment->AddAttachment(new File(response[i + 1].GetValue<int>(), response[i + 2].GetValueCharPtr(), response[i + 3].GetValue<bool>()));
+						}
+					}
+
+					break;
+				}
 				case MessageResponses::ChangeUsername:
 				{
-					changeUsernameState = *(int*)response[0].GetValue() ? ChangeUsernameState::ChangeSuccessful : ChangeUsernameState::Error;
+					changeUsernameState = response[0].GetValue<int>() ? ChangeUsernameState::ChangeSuccessful : ChangeUsernameState::Error;
 
 					break;
 				}
 				case MessageResponses::ChangePassword:
 				{
-					changePasswordState = *(int*)response[0].GetValue() ? ChangePasswordState::ChangeSuccessful : ChangePasswordState::Error;
+					changePasswordState = response[0].GetValue<int>() ? ChangePasswordState::ChangeSuccessful : ChangePasswordState::Error;
 
 					break;
 				}
 			}
+		}
+		else if (message.GetType() == Core::MessageType::DownloadFile)
+		{
+			auto path = FileDialog::SaveFile(downloadFileExtension.c_str());
+			if (!path.empty())
+				FileWriter::WriteFile(path, message.Body.Content);
 		}
 
 		messageQueue.Pop();
@@ -1026,13 +1075,8 @@ namespace Client
 			{
 				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("New assignment").x) / 2);
 				if (ImGui::Button("New assignment"))
-				{
 					openAssignmentCreationPopup = true;
-					editingAssignmentData = AssignmentData();
-				}
 			}
-
-			const char* timeFormat = "%d.%m.%Y %H:%M"; // Format: 13.06.2025 23:59
 
 			ImVec2 padding(8.0f, 8.0f);
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, padding);
@@ -1043,7 +1087,7 @@ namespace Client
 					if (assignment->GetStatus() == AssignmentStatus::InProgress)
 					{
 						ImGui::PushID(assignment->GetId());
-						bool assignmentOpened = ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap);
+						bool assignmentOpened = ImGui::TreeNodeEx((void*)assignment->GetId(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap, assignment->GetName());
 
 						if (isTeamOwner)
 						{
@@ -1076,18 +1120,7 @@ namespace Client
 
 						if (assignmentOpened)
 						{
-							ImGui::BeginDisabled();
-							ImGui::Text("Description");
-							ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
-
-							ImGui::Text("Assigned users");
-							if (ImGui::BeginListBox("##UserListbox", ImVec2(ImGui::GetContentRegionAvail().x, 65.0f)))
-							{
-								for (auto& [id, assignmentUser] : assignment->GetUsers())
-									ImGui::Text(assignmentUser->GetName());
-
-								ImGui::EndListBox();
-							}
+							RenderCommonAssignmentProperties(assignment);
 
 							// Parse deadline to char array
 							std::time_t deadline = assignment->GetDeadLine();
@@ -1102,14 +1135,96 @@ namespace Client
 							if (isAfterDeadline)
 								ImGui::PushStyleColor(ImGuiCol_Text, errorColor);
 
+							ImGui::BeginDisabled();
 							ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
 							ImGui::EndDisabled();
 
 							if (isAfterDeadline)
 								ImGui::PopStyleColor();
 
+							if (assignment->GetUserAttachmentCount())
+							{
+								ImGui::Text("Uploaded files");
+
+								if (ImGui::BeginTable("UserAttachmentTable", 2))
+								{
+									bool shiftPressed = ImGui::IsKeyDown(ImGuiKey_LeftShift);
+
+									ImGui::TableSetupColumn("AttachmentName", ImGuiTableColumnFlags_WidthStretch);
+									ImGui::TableSetupColumn("RemoveButton", ImGuiTableColumnFlags_WidthFixed, !isTeamOwner && shiftPressed ? 80.0f : 100.0f);
+
+									ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
+									for (Ref<File> attachment : assignment->GetAttachments())
+									{
+										if (!attachment->IsByUser())
+											continue;
+
+										ImGui::TableNextColumn();
+										ImGui::AlignTextToFramePadding();
+										ImGui::Text(attachment->GetName());
+
+										int attachmentId = attachment->GetId();
+										ImGui::TableNextColumn();
+										ImGui::PushID(attachmentId);
+
+										if (isTeamOwner)
+										{
+											if (ImGui::Button("Download"))
+											{
+												SetFileExtension(attachment->GetName());
+												DownloadAttachment(attachmentId);
+											}
+										}
+										else
+										{
+											if (shiftPressed)
+											{
+												if (ImGui::Button("Remove"))
+													DeleteAttachment(attachmentId);
+											}
+											else
+											{
+												if (ImGui::Button("Download"))
+												{
+													SetFileExtension(attachment->GetName());
+													DownloadAttachment(attachmentId);
+												}
+											}
+										}
+
+										ImGui::PopID();
+									}
+									ImGui::PopStyleVar();
+
+									ImGui::EndTable();
+								}
+							}
+
 							if (!isTeamOwner)
 							{
+								ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Upload file").x) / 2);
+								if (ImGui::Button("Upload file"))
+								{
+									auto filePath = FileDialog::OpenFile("");
+									if (!filePath.empty())
+									{
+										Ref<Buffer> file = FileReader::ReadFile(filePath);
+
+										if (file)
+										{
+											Ref<File> attachment = new File((const char*)filePath.filename().u8string().c_str(), file, true);
+											attachment->SetId(assignment->GetId());
+
+											SendAttachment(attachment);
+										}
+										else
+											editingAssignmentData.Error = CreateAssignmentErrorType::MaxAttachmentSizeReached;
+									}
+								}
+
+								if (ImGui::IsItemHovered())
+									ImGui::SetTooltip("Maximum size of file can bo 20MB");
+
 								ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Submit").x) / 2);
 								if (ImGui::Button("Submit"))
 								{
@@ -1121,6 +1236,11 @@ namespace Client
 									command.AddData(new Core::DatabaseInt(assignment->GetId()));
 
 									SendCommandMessage(command);
+
+									std::string message = "Assignment ";
+									message += assignment->GetName();
+									message += " has been submitted";
+									SendNotificationMessage(loggedUser.GetSelectedTeam().GetOwnerId(), message.c_str());
 								}
 							}
 						}
@@ -1138,20 +1258,9 @@ namespace Client
 					if (assignment->GetStatus() == AssignmentStatus::Submitted)
 					{
 						ImGui::PushID(assignment->GetId());
-						if (ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap))
+						if (ImGui::TreeNodeEx((void*)assignment->GetId(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap, assignment->GetName()))
 						{
-							ImGui::BeginDisabled();
-							ImGui::Text("Description");
-							ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
-
-							ImGui::Text("Assigned users");
-							if (ImGui::BeginListBox("##UserListbox", ImVec2(ImGui::GetContentRegionAvail().x, 65.0f)))
-							{
-								for (auto& [id, assignmentUser] : assignment->GetUsers())
-									ImGui::Text(assignmentUser->GetName());
-
-								ImGui::EndListBox();
-							}
+							RenderCommonAssignmentProperties(assignment);
 
 							// Parse deadline to char array
 							std::time_t deadline = assignment->GetDeadLine();
@@ -1161,13 +1270,68 @@ namespace Client
 
 							ImGui::Text("Deadline");
 							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							ImGui::BeginDisabled();
 							ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
 							ImGui::EndDisabled();
+
+							// Render submit time
+							// Parse submmitTime to char array
+							std::time_t submitTime = assignment->GetSubmitTime();
+							std::tm* submitTimeTm = localtime(&submitTime);
+							char submitTimeStr[32];
+							strftime(submitTimeStr, sizeof(submitTimeStr), timeFormat, submitTimeTm);
+
+							ImGui::Text("Submitted");
+							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+
+							bool submitAfterDeadline = difftime(submitTime, deadline) > 0;
+							if (submitAfterDeadline)
+								ImGui::PushStyleColor(ImGuiCol_Text, errorColor);
+
+							ImGui::InputText("##SubmitTime", submitTimeStr, sizeof(submitTimeStr));
+
+							if (submitAfterDeadline)
+								ImGui::PopStyleColor();
+
+							if (assignment->GetUserAttachmentCount())
+							{
+								ImGui::Text("Uploaded files");
+
+								if (ImGui::BeginTable("UserAttachmentTable", 2))
+								{
+									ImGui::TableSetupColumn("AttachmentName", ImGuiTableColumnFlags_WidthStretch);
+									ImGui::TableSetupColumn("RemoveButton", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+
+									ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
+									for (Ref<File> attachment : assignment->GetAttachments())
+									{
+										if (!attachment->IsByUser())
+											continue;
+
+										ImGui::TableNextColumn();
+										ImGui::AlignTextToFramePadding();
+										ImGui::Text(attachment->GetName());
+
+										int attachmentId = attachment->GetId();
+										ImGui::TableNextColumn();
+										ImGui::PushID(attachmentId);
+										if (ImGui::Button("Download"))
+										{
+											SetFileExtension(attachment->GetName());
+											DownloadAttachment(attachmentId);
+										}
+										ImGui::PopID();
+									}
+									ImGui::PopStyleVar();
+
+									ImGui::EndTable();
+								}
+							}
 
 							ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Rate").x) / 2);
 							if (ImGui::Button("Rate"))
 							{
-								editingAssignmentData.AssignmentId = assignment->GetId();
+								editingAssignmentData = assignment;
 								openRateAssignmentPopup = true;
 							}
 						}
@@ -1185,21 +1349,11 @@ namespace Client
 					if (assignment->GetStatus() == AssignmentStatus::Rated)
 					{
 						ImGui::PushID(assignment->GetId());
-						if (ImGui::TreeNodeEx(assignment->GetName(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap))
+						if (ImGui::TreeNodeEx((void*)assignment->GetId(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_AllowItemOverlap, assignment->GetName()))
 						{
-							ImGui::BeginDisabled();
-							ImGui::Text("Description");
-							ImGui::InputTextMultiline("##desc", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
+							RenderCommonAssignmentProperties(assignment);
 
-							ImGui::Text("Assigned users");
-							if (ImGui::BeginListBox("##UserListbox", ImVec2(ImGui::GetContentRegionAvail().x, 65.0f)))
-							{
-								for (auto& [id, assignmentUser] : assignment->GetUsers())
-									ImGui::Text(assignmentUser->GetName());
-
-								ImGui::EndListBox();
-							}
-
+							// Render deadline
 							// Parse deadline to char array
 							std::time_t deadline = assignment->GetDeadLine();
 							std::tm* deadlineTime = localtime(&deadline);
@@ -1208,8 +1362,11 @@ namespace Client
 
 							ImGui::Text("Deadline");
 							ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+							ImGui::BeginDisabled();
 							ImGui::InputText("##Deadline", deadlineStr, sizeof(deadlineStr));
+							ImGui::EndDisabled();
 
+							// Render submit time
 							// Parse submmitTime to char array
 							std::time_t submitTime = assignment->GetSubmitTime();
 							std::tm* submitTimeTm = localtime(&submitTime);
@@ -1223,16 +1380,52 @@ namespace Client
 							if (submitAfterDeadline)
 								ImGui::PushStyleColor(ImGuiCol_Text, errorColor);
 
-							ImGui::InputText("##Deadline", submitTimeStr, sizeof(deadlineStr));
+							ImGui::InputText("##SubmitTime", submitTimeStr, sizeof(submitTimeStr));
 
 							if (submitAfterDeadline)
 								ImGui::PopStyleColor();
 
+							if (assignment->GetUserAttachmentCount())
+							{
+								ImGui::Text("Uploaded files");
+
+								if (ImGui::BeginTable("UserAttachmentTable", 2))
+								{
+									ImGui::TableSetupColumn("AttachmentName", ImGuiTableColumnFlags_WidthStretch);
+									ImGui::TableSetupColumn("RemoveButton", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+
+									ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
+									for (Ref<File> attachment : assignment->GetAttachments())
+									{
+										if (!attachment->IsByUser())
+											continue;
+
+										ImGui::TableNextColumn();
+										ImGui::AlignTextToFramePadding();
+										ImGui::Text(attachment->GetName());
+
+										int attachmentId = attachment->GetId();
+										ImGui::TableNextColumn();
+										ImGui::PushID(attachmentId);
+										if (ImGui::Button("Download"))
+										{
+											SetFileExtension(attachment->GetName());
+											DownloadAttachment(attachmentId);
+										}
+										ImGui::PopID();
+									}
+									ImGui::PopStyleVar();
+
+									ImGui::EndTable();
+								}
+							}
+
+							// Render rating
+							ImGui::BeginDisabled();
 							if (assignment->GetRatingDescriptionSize())
 							{
 								ImGui::Text("Rated description");
-								ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-								ImGui::InputTextMultiline("##rating_desc", (char*)assignment->GetRatingDescription(), assignment->GetDescriptionSize(), ImVec2(0.0f, 100.0f));
+								ImGui::InputTextMultiline("##rating_desc", (char*)assignment->GetRatingDescription(), assignment->GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
 							}
 
 							std::string rating = "Rating: " + std::to_string(assignment->GetRating());
@@ -1300,49 +1493,51 @@ namespace Client
 			}
 
 			ImGui::SetNextWindowBgAlpha(0.0f);
-			ImGui::BeginTable("MemberTable", 2, ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY);
-
-			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-			ImGui::TableSetupColumn("RemoveButton", ImGuiTableColumnFlags_WidthFixed, 100.0f);
-
-			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
-			for (Ref<User> teamUser : loggedUser.GetSelectedTeam().GetUsers())
+			if (ImGui::BeginTable("MemberTable", 2, ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY))
 			{
-				ImGui::TableNextColumn();
-				ImGui::AlignTextToFramePadding();
-				ImGui::Text(teamUser->GetName());
-				ImGui::TableNextColumn();
-
-				if (isTeamOwner && !teamUser->IsTeamOwner(loggedUser.GetSelectedTeam()))
+				ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableSetupColumn("RemoveButton", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+				
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
+				for (Ref<User> teamUser : loggedUser.GetSelectedTeam().GetUsers())
 				{
-					ImGui::SameLine();
-					ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
-					ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+					ImGui::TableNextColumn();
+					ImGui::AlignTextToFramePadding();
+					ImGui::Text(teamUser->GetName());
+					ImGui::TableNextColumn();
 
-					ImGui::PushID(teamUser->GetId());
-					if (ImGui::Button("Remove"))
+					if (isTeamOwner && !teamUser->IsTeamOwner(loggedUser.GetSelectedTeam()))
 					{
-						Core::Command command((uint32_t)MessageResponses::None);
-						command.SetType(Core::CommandType::Command);
+						ImGui::SameLine();
+						ImGui::PushStyleColor(ImGuiCol_Button, redButtonColor);
+						ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+						ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
 
-						command.SetCommandString("DELETE FROM users_teams WHERE user_id = ? AND team_id = ?;");
-						command.AddData(new Core::DatabaseInt(teamUser->GetId()));
-						command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
-						SendCommandMessage(command);
+						ImGui::PushID(teamUser->GetId());
+						if (ImGui::Button("Remove"))
+						{
+							Core::Command command((uint32_t)MessageResponses::None);
+							command.SetType(Core::CommandType::Command);
 
-						std::string message = "You have been removed from ";
-						message += loggedUser.GetSelectedTeam().GetName();
-						SendNotificationMessage(teamUser->GetId(), message.c_str());
+							command.SetCommandString("DELETE FROM users_teams WHERE user_id = ? AND team_id = ?;");
+							command.AddData(new Core::DatabaseInt(teamUser->GetId()));
+							command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
+							SendCommandMessage(command);
+
+							std::string message = "You have been removed from ";
+							message += loggedUser.GetSelectedTeam().GetName();
+							SendNotificationMessage(teamUser->GetId(), message.c_str());
+						}
+						ImGui::PopID();
+
+						ImGui::PopStyleColor(3);
 					}
-					ImGui::PopID();
-
-					ImGui::PopStyleColor(3);
 				}
-			}
-			ImGui::PopStyleVar();
+				ImGui::PopStyleVar();
 
-			ImGui::EndTable();
+				ImGui::EndTable();
+			}
+			
 			ImGui::EndTabItem();
 		}
 		ImGui::EndTabBar();
@@ -1504,8 +1699,56 @@ namespace Client
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
 			ImGui::InputText("##Name", editingAssignmentData.Name, editingAssignmentData.GetNameSize());
 
-			ImGui::Text("Description");
-			ImGui::InputTextMultiline("##Description", editingAssignmentData.Description, editingAssignmentData.GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
+			ImGui::Text("Task");
+			ImGui::InputTextMultiline("##TaskInput", editingAssignmentData.Description, editingAssignmentData.GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
+
+			// Render Add attachment button
+			if (ImGui::Button("Add attachment"))
+			{
+				auto filePath = FileDialog::OpenFile("");
+				if (!filePath.empty())
+				{
+					Ref<Buffer> file = FileReader::ReadFile(filePath);
+
+					if (file)
+						editingAssignmentData.AddAttachment(new File((const char*)filePath.filename().u8string().c_str(), file, false));
+					else
+						editingAssignmentData.Error = CreateAssignmentErrorType::MaxAttachmentSizeReached;
+				}
+			}
+
+			// Tool tip when Add attachment button is hovered
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Maximum size of file can be 20MB");
+
+			// Render attachments in assignment
+			if (editingAssignmentData.GetAttachmentCount())
+				ImGui::Text("Attachments");
+
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, redButtonColor);
+			ImGui::PushStyleColor(ImGuiCol_ButtonActive, redButtonActiveColor);
+
+			for (uint32_t j = 0; j < editingAssignmentData.GetAttachmentCount(); j++)
+			{
+				Ref<File>& attachment = editingAssignmentData.GetAttachments()[j];
+
+				// Calculate button wrapping
+				float windowRightBorder = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+				float buttonSize = ImGui::CalcItemWidth();
+				float lastButtonPos = ImGui::GetItemRectMin().x;
+				float nextButtonPos = lastButtonPos + ImGui::GetStyle().ItemSpacing.x + buttonSize;
+
+				if (j != 0 && nextButtonPos < windowRightBorder)
+					ImGui::SameLine();
+
+				// Remove clicked attachment
+				if (ImGui::Button(attachment->GetName()))
+				{
+					editingAssignmentData.RemoveAttachment(j);
+					j--;
+				}
+			}
+			ImGui::PopStyleColor(2);
 
 			ImGui::Text("Users");
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -1566,18 +1809,22 @@ namespace Client
 				editingAssignmentData.UpdateDeadLine();
 			ImGui::PopStyleVar();
 
-			switch (createAssignmentError)
+			switch (editingAssignmentData.Error)
 			{
-			case Client::CreateAssignmentErrorType::None:
+			case CreateAssignmentErrorType::None:
 				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f); // Skip height of the error text height
 				break;
-			case Client::CreateAssignmentErrorType::WrongDate:
+			case CreateAssignmentErrorType::WrongDate:
 				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Date has to be in the future!").x) / 2);
 				ImGui::TextColored(errorColor, "Date has to be in the future!");
 				break;
-			case Client::CreateAssignmentErrorType::NoUser:
+			case CreateAssignmentErrorType::NoUser:
 				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("No user added!").x) / 2);
 				ImGui::TextColored(errorColor, "No user added!");
+				break;
+			case CreateAssignmentErrorType::MaxAttachmentSizeReached:
+				ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Maximum size of file is 20MB!").x) / 2);
+				ImGui::TextColored(errorColor, "Maximum size of file is 20MB!");
 				break;
 			}
 
@@ -1587,9 +1834,7 @@ namespace Client
 
 			if (ImGui::Button("Cancel"))
 			{
-				createAssignmentError = CreateAssignmentErrorType::None;
 				editingAssignmentData = AssignmentData();
-
 				ImGui::CloseCurrentPopup();
 			}
 
@@ -1602,6 +1847,7 @@ namespace Client
 
 					if (difftime(editingAssignmentData.DeadLine, now) > 0)
 					{
+						// Create assignment
 						Core::Command command((uint32_t)MessageResponses::LinkAssignmentToUser);
 						command.SetType(Core::CommandType::Command);
 
@@ -1612,13 +1858,28 @@ namespace Client
 						command.AddData(new Core::DatabaseTimestamp(editingAssignmentData.DeadLine));
 						SendCommandMessage(command);
 
+						// Send notifications to users about new assignment
+						for (auto& [id, assignmentUser] : editingAssignmentData.GetUsers())
+						{
+							Core::Command notificationCommand((uint32_t)MessageResponses::None);
+							notificationCommand.SetType(Core::CommandType::Command);
+
+							std::string message = "You have new assignment in ";
+							message += loggedUser.GetSelectedTeam().GetName();
+
+							notificationCommand.SetCommandString("INSERT INTO notifications (user_id, message) VALUES (?, ?);");
+							notificationCommand.AddData(new Core::DatabaseInt(id));
+							notificationCommand.AddData(new Core::DatabaseString(message));
+							SendCommandMessage(notificationCommand);
+						}
+
 						ImGui::CloseCurrentPopup();
 					}
 					else
-						createAssignmentError = CreateAssignmentErrorType::WrongDate;
+						editingAssignmentData.Error = CreateAssignmentErrorType::WrongDate;
 				}
 				else
-					createAssignmentError = CreateAssignmentErrorType::NoUser;
+					editingAssignmentData.Error = CreateAssignmentErrorType::NoUser;
 			}
 
 			ImGui::EndPopup();
@@ -1646,8 +1907,8 @@ namespace Client
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
 			ImGui::InputText("##Name", editingAssignmentData.Name, editingAssignmentData.GetNameSize());
 
-			ImGui::Text("Description");
-			ImGui::InputTextMultiline("##Description", editingAssignmentData.Description, editingAssignmentData.GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
+			ImGui::Text("Task");
+			ImGui::InputTextMultiline("##TaskInput", editingAssignmentData.Description, editingAssignmentData.GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
 
 			ImGui::Text("Deadline");
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
@@ -1657,7 +1918,7 @@ namespace Client
 				editingAssignmentData.UpdateDeadLine();
 			ImGui::PopStyleVar();
 
-			switch (createAssignmentError)
+			switch (editingAssignmentData.Error)
 			{
 			case Client::CreateAssignmentErrorType::None:
 				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 33.0f); // Skip height of the error text height
@@ -1674,7 +1935,6 @@ namespace Client
 
 			if (ImGui::Button("Cancel"))
 			{
-				createAssignmentError = CreateAssignmentErrorType::None;
 				editingAssignmentData = AssignmentData();
 
 				ImGui::CloseCurrentPopup();
@@ -1683,26 +1943,43 @@ namespace Client
 			ImGui::SameLine();
 			if (ImGui::Button("Edit"))
 			{
-				std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+				Ref<Assignment> assignment = loggedUser.GetAssignments()[editingAssignmentData.AssignmentId];
 
-				if (difftime(editingAssignmentData.DeadLine, now) > 0)
+				if (strcmp(editingAssignmentData.Name, assignment->GetName()) || strcmp(editingAssignmentData.Description, assignment->GetDescription()) || difftime(editingAssignmentData.DeadLine, assignment->GetDeadLine()))
 				{
-					Core::Command command((uint32_t)MessageResponses::None);
-					command.SetType(Core::CommandType::Update);
+					std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
-					command.SetCommandString("UPDATE assignments set name = ?, description = ?, deadline = ? WHERE id = ?;");
-					command.AddData(new Core::DatabaseString(editingAssignmentData.Name));
-					command.AddData(new Core::DatabaseString(editingAssignmentData.Description));
-					command.AddData(new Core::DatabaseTimestamp(editingAssignmentData.DeadLine));
-					command.AddData(new Core::DatabaseInt(editingAssignmentData.AssignmentId));
+					if (difftime(editingAssignmentData.DeadLine, now) > 0)
+					{
+						Core::Command command((uint32_t)MessageResponses::None);
+						command.SetType(Core::CommandType::Update);
 
-					SendCommandMessage(command);
+						command.SetCommandString("UPDATE assignments set name = ?, description = ?, deadline = ? WHERE id = ?;");
+						command.AddData(new Core::DatabaseString(editingAssignmentData.Name));
+						command.AddData(new Core::DatabaseString(editingAssignmentData.Description));
+						command.AddData(new Core::DatabaseTimestamp(editingAssignmentData.DeadLine));
+						command.AddData(new Core::DatabaseInt(editingAssignmentData.AssignmentId));
 
-					editingAssignmentData = AssignmentData();
-					ImGui::CloseCurrentPopup();
+						SendCommandMessage(command);
+
+						for (auto& [id, assignmentUser] : assignment->GetUsers())
+						{
+							std::string message = "Your assignment ";
+							message += assignment->GetName();
+							message += " in ";
+							message += loggedUser.GetSelectedTeam().GetName();
+							message += " has been updated";
+							SendNotificationMessage(id, message.c_str());
+						}
+
+						editingAssignmentData = AssignmentData();
+						ImGui::CloseCurrentPopup();
+					}
+					else
+						editingAssignmentData.Error = CreateAssignmentErrorType::WrongDate;
 				}
 				else
-					createAssignmentError = CreateAssignmentErrorType::WrongDate;
+					ImGui::CloseCurrentPopup();
 			}
 
 			ImGui::EndPopup();
@@ -1792,11 +2069,73 @@ namespace Client
 
 				SendCommandMessage(command);
 
+				for (auto& [id, assignmentUser] : editingAssignmentData.GetUsers())
+				{
+					std::string message = "Your assignment ";
+					message += editingAssignmentData.Name;
+					message += " in ";
+					message += loggedUser.GetSelectedTeam().GetName();
+					message += " has been rated";
+					SendNotificationMessage(id, message.c_str());
+				}
+
 				editingAssignmentData = AssignmentData();
 				ImGui::CloseCurrentPopup();
 			}
 
 			ImGui::EndPopup();
+		}
+	}
+
+	void ClientApp::RenderCommonAssignmentProperties(Ref<Assignment> assignment)
+	{
+		ImGui::BeginDisabled();
+		ImGui::Text("Task");
+		ImGui::InputTextMultiline("##Task", (char*)assignment->GetDescription(), assignment->GetDescriptionSize(), ImVec2(ImGui::GetContentRegionAvail().x, 100.0f));
+
+		ImGui::Text("Assigned users");
+		if (ImGui::BeginListBox("##UserListbox", ImVec2(ImGui::GetContentRegionAvail().x, 65.0f)))
+		{
+			for (auto& [id, assignmentUser] : assignment->GetUsers())
+				ImGui::Text(assignmentUser->GetName());
+
+			ImGui::EndListBox();
+		}
+		ImGui::EndDisabled();
+
+		if (assignment->GetOwnerAttachmentCount())
+		{
+			ImGui::Text("Attachments");
+
+			if (ImGui::BeginTable("OwnerAttachmentTable", 2))
+			{
+				ImGui::TableSetupColumn("AttachmentName", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableSetupColumn("DownloadButton", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 5.0f));
+				for (Ref<File> attachment : assignment->GetAttachments())
+				{
+					if (attachment->IsByUser())
+						continue;
+
+					ImGui::TableNextColumn();
+					ImGui::AlignTextToFramePadding();
+					ImGui::Text(attachment->GetName());
+
+					int attachmentId = attachment->GetId();
+					ImGui::TableNextColumn();
+					ImGui::PushID(attachmentId);
+					if (ImGui::Button("Download"))
+					{
+						SetFileExtension(attachment->GetName());
+						DownloadAttachment(attachmentId);
+					}
+					ImGui::PopID();
+				}
+				ImGui::PopStyleVar();
+
+				ImGui::EndTable();
+			}
 		}
 	}
 
@@ -1843,7 +2182,7 @@ namespace Client
 				ImGui::BeginDisabled();
 				ImGui::InputText("##Invite", (char*)teamName, strlen(teamName), ImGuiInputTextFlags_ReadOnly);
 				ImGui::EndDisabled();
-				ImGui::SameLine();\
+				ImGui::SameLine();
 				if (ImGui::Button("Accept"))
 				{
 					Core::Command command((uint32_t)MessageResponses::None);
@@ -2073,6 +2412,25 @@ namespace Client
 		networkInterface->SendMessagePackets(message);
 	}
 
+	void ClientApp::SendAttachment(Ref<File> attachment)
+	{
+		Ref<Core::Message> message = CreateRef<Core::Message>();
+		message->Header.Type = Core::MessageType::UploadFile;
+		attachment->Serialize(message->Body.Content);
+		message->Header.Size = message->Body.Content->GetSize();
+
+		networkInterface->SendMessagePackets(message);
+	}
+
+	void ClientApp::DownloadAttachment(uint32_t attachmentId)
+	{
+		Ref<Core::Message> message = CreateRef<Core::Message>();
+		message->Header.Type = Core::MessageType::DownloadFile;
+		message->CreateBody<uint32_t>(attachmentId);
+
+		networkInterface->SendMessagePackets(message);
+	}
+
 	void ClientApp::SendCheckEmailMessage(const char* email)
 	{
 		Core::Command command((uint32_t)MessageResponses::CheckEmail);
@@ -2187,7 +2545,7 @@ namespace Client
 		Core::Command command((uint32_t)MessageResponses::ProcessAssignments);
 		command.SetType(Core::CommandType::Query);
 
-		command.SetCommandString("SELECT assignments.id, assignments.name, assignments.description, assignments.data_path, assignments.status, assignments.rating, assignments.rating_description, assignments.deadline, assignments.submitted_at FROM users_assignments JOIN assignments ON users_assignments.assignment_id = assignments.id WHERE users_assignments.user_id = ? AND assignments.team_id = ? ORDER BY deadline LIMIT 200;");
+		command.SetCommandString("SELECT assignments.id, assignments.name, assignments.description, assignments.status, assignments.rating, assignments.rating_description, assignments.deadline, assignments.submitted_at FROM users_assignments JOIN assignments ON users_assignments.assignment_id = assignments.id WHERE users_assignments.user_id = ? AND assignments.team_id = ? ORDER BY deadline LIMIT 200;");
 		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
 		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
 
@@ -2200,7 +2558,7 @@ namespace Client
 		Core::Command command((uint32_t)MessageResponses::ProcessNotifications);
 		command.SetType(Core::CommandType::Query);
 
-		command.SetCommandString("SELECT id, message FROM notifications WHERE user_id = ?;");
+		command.SetCommandString("SELECT id, message FROM notifications WHERE user_id = ? ORDER BY id DESC;");
 		command.AddData(new Core::DatabaseInt(loggedUser.GetId()));
 
 		SendCommandMessage(command);
@@ -2212,7 +2570,7 @@ namespace Client
 		Core::Command command((uint32_t)MessageResponses::ProcessAssignments);
 		command.SetType(Core::CommandType::Query);
 
-		command.SetCommandString("SELECT id, name, description, data_path, status, rating, rating_description, deadline, submitted_at FROM assignments WHERE team_id = ? ORDER BY deadline LIMIT 200");
+		command.SetCommandString("SELECT id, name, description, status, rating, rating_description, deadline, submitted_at FROM assignments WHERE team_id = ? ORDER BY deadline LIMIT 200");
 		command.AddData(new Core::DatabaseInt(loggedUser.GetSelectedTeam().GetId()));
 
 		SendCommandMessage(command);
@@ -2227,6 +2585,15 @@ namespace Client
 		command.AddData(new Core::DatabaseInt(assignment->GetId()));
 
 		SendCommandMessage(command);
+	}
+
+	void ClientApp::ReadAssignmentsAttachments(Ref<Assignment> assignment)
+	{
+		Ref<Core::Message> message = CreateRef<Core::Message>();
+		message->Header.Type = Core::MessageType::ReadFileName;
+		message->CreateBody<uint32_t>(assignment->GetId());
+
+		networkInterface->SendMessagePackets(message);
 	}
 
 	// Send command to read all selected team messages
@@ -2304,7 +2671,20 @@ namespace Client
 		command.SetCommandString("DELETE FROM users_assignments WHERE assignment_id = ?;");
 		SendCommandMessage(command);
 
+		command.SetCommandString("DELETE FROM attachments WHERE assignment_id = ?;");
+		SendCommandMessage(command);
+
 		command.SetCommandString("DELETE FROM assignments WHERE id = ?;");
+		SendCommandMessage(command);
+	}
+
+	void ClientApp::DeleteAttachment(uint32_t attachmentId)
+	{
+		Core::Command command((uint32_t)MessageResponses::None);
+		command.SetType(Core::CommandType::Command);
+
+		command.SetCommandString("DELETE FROM attachments WHERE id = ?;");
+		command.AddData(new Core::DatabaseInt(attachmentId));
 		SendCommandMessage(command);
 	}
 

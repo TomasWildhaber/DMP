@@ -15,7 +15,11 @@ namespace Core
 	struct DatabaseData
 	{
 		virtual inline const DatabaseDataType GetType() const { return DatabaseDataType::None; }
-		virtual void* GetValue() { return nullptr; }
+		virtual inline void* GetValue() { return nullptr; }
+		inline const char* GetValueCharPtr() { return (const char*)GetValue(); }
+
+		template<typename T>
+		inline T GetValue() { return *(T*)GetValue(); }
 
 		virtual void Serialize(std::ostream& os) = 0;
 		virtual void Deserialize(std::istream& is) = 0;

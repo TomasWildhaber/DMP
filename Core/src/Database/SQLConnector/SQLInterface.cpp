@@ -56,7 +56,7 @@ namespace Core
 		}
 		catch (const sql::SQLException& e)
 		{
-			ERROR("SQL statement error: {0}", e.getSQLStateCStr());
+			ERROR("SQL statement error: {0}, {1}", e.getSQLStateCStr(), e.getErrorCode());
 			return false;
 		}
 	}
@@ -72,7 +72,7 @@ namespace Core
 		}
 		catch (const sql::SQLException& e)
 		{
-			ERROR("SQL query error: {0}", e.getSQLStateCStr());
+			ERROR("SQL query error: {0}, {1}", e.getSQLStateCStr(), e.getErrorCode());
 			return false;
 		}
 	}
@@ -88,7 +88,7 @@ namespace Core
 		}
 		catch (const sql::SQLException& e)
 		{
-			ERROR("SQL update error: {0}", e.getSQLStateCStr());
+			ERROR("SQL update error: {0}, {1}", e.getSQLStateCStr(), e.getErrorCode());
 			return false;
 		}
 	}
@@ -107,6 +107,9 @@ namespace Core
 
 				switch (type)
 				{
+				case 2: // bool
+					response.AddData(new DatabaseBool(result->getBoolean(i + 1)));
+					break;
 				case 5:
 				case 6: // int
 					response.AddData(new DatabaseInt(result->getInt(i + 1)));

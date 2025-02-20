@@ -27,6 +27,7 @@ namespace Client
 		None = 0,
 		WrongDate, /// Wrong date selected
 		NoUser, // No users added
+		MaxAttachmentSizeReached,
 	};
 
 	// Enum of invite states

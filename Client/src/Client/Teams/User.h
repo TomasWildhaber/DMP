@@ -1,7 +1,7 @@
 #pragma once
 #include "Team.h"
 #include "Invite.h"
-#include "Notification.h"
+#include "Client/Notification.h"
 #include "Debugging/Log.h"
 
 namespace Client

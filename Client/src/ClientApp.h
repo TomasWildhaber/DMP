@@ -3,12 +3,12 @@
 #include "Networking/NetworkClientInterface.h"
 #include "Networking/MessageQueue.h"
 #include "Client/ErrorTypes.h"
-#include "Client/User.h"
+#include "Client/Teams/User.h"
 #include "Database/Command.h"
-#include "Client/Assignment.h"
+#include "Client/Assignments/Assignment.h"
 
 #define CHAR_BUFFER_SIZE 256 // Size of char buffers
-#define CHAR_SHORT_BUFFER_SIZE 26 // Size of small char buffers
+#define CHAR_SHORT_BUFFER_SIZE 36 // Size of small char buffers
 
 struct ImFont;
 
@@ -28,6 +28,7 @@ namespace Client
 		UpdateInvites, // Reserved by server
 		UpdateNotifications, // Reserved by server
 		UpdateAssignments, // Reserved by server
+		ProcessAssignmentAttachments, // Reserved by server
 		LinkAssignmentToUser,
 		UpdateLoggedUser,
 		CheckInvite,
@@ -114,12 +115,16 @@ namespace Client
 		void RenderDeleteAssignmentPopup(ImGuiWindowFlags flags);
 		void RenderRateAssignmentPopup(ImGuiWindowFlags flags);
 
+		void RenderCommonAssignmentProperties(Ref<Assignment> assignment);
 		void RenderUserPage(ImGuiWindowFlags flags);
 
 		void ResetActionStates();
 
 		// Sending methods
 		void SendCommandMessage(Core::Command& command);
+		void SendAttachment(Ref<File> attachment);
+		void DownloadAttachment(uint32_t attachmentId);
+
 		void SendLoginMessage();
 		void SendRegisterMessage();
 		void SendNotificationMessage(uint32_t userId, const char* message);
@@ -137,6 +142,7 @@ namespace Client
 		void ReadUsersAssignments();
 		void ReadSelectedTeamAssignments();
 		void ReadAssignmentsUsers(Ref<Assignment> assignment);
+		void ReadAssignmentsAttachments(Ref<Assignment> assignment);
 
 		void ReadSelectedTeamMessages();
 		void ReadSelectedTeamUsers();
@@ -149,6 +155,7 @@ namespace Client
 		void DeleteAllNotifications();
 
 		void DeleteAssignment(uint32_t assignmentId);
+		void DeleteAttachment(uint32_t attachmentId);
 
 		void DeleteSelectedTeam();
 		void RenameSelectedTeam(const char* teamName);
@@ -168,7 +175,6 @@ namespace Client
 		ClientState state = ClientState::None;
 
 		// Action states
-		CreateAssignmentErrorType createAssignmentError = CreateAssignmentErrorType::None; // Error for creating assignment
 		InviteState inviteState = InviteState::None; // State for inviting users into team
 		ChangeUsernameState changeUsernameState = ChangeUsernameState::None; // State for changing username
 		ChangePasswordState changePasswordState = ChangePasswordState::None; // State for changing password

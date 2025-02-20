@@ -2,8 +2,12 @@
 #include "Core/EntryPoint.h"
 #include "Debugging/Log.h"
 #include "ServerApp.h"
+
 #include "Database/Command.h"
 #include "Database/Response.h"
+
+#include "Utils/FileWriter.h"
+#include "Utils/FileReader.h"
 
 namespace Server
 {
@@ -158,8 +162,104 @@ namespace Server
 				}
 			}
 		}
+		else if (message.GetType() == Core::MessageType::ReadFileName)
+		{
+			uint32_t assignmentId = *message.Body.Content->GetDataAs<uint32_t>();
+
+			Core::Command command;
+			command.SetType(Core::CommandType::Query);
+
+			command.SetCommandString("SELECT id, file_path, by_user FROM attachments WHERE assignment_id = ?;");
+			command.AddData(new Core::DatabaseInt(assignmentId));
+			databaseInterface->Query(command);
+
+			Core::Response internResponse;
+			databaseInterface->FetchData(internResponse);
+
+			Core::Response response(11);
+			for (uint32_t i = 0; i < internResponse.GetDataCount(); i += 3)
+			{
+				std::filesystem::path path = dir / (const char*)internResponse[i + 1].GetValue();
+				Ref<Buffer> serializedData = FileReader::ReadFile(path);
+
+				File file;
+				file.DeserializeWithoutData(serializedData);
+				response.AddData(new Core::DatabaseInt(file.GetId()));
+
+				file.SetId(*(int*)internResponse[i].GetValue());
+				response.AddData(new Core::DatabaseInt(file.GetId()));
+				response.AddData(new Core::DatabaseString(file.GetName()));
+				response.AddData(new Core::DatabaseBool(file.IsByUser()));
+			}
+
+			SendResponse(response);
+		}
+		else if (message.GetType() == Core::MessageType::DownloadFile)
+		{
+			uint32_t attachmentId = *message.Body.Content->GetDataAs<uint32_t>();
+
+			Core::Command command;
+			command.SetType(Core::CommandType::Query);
+
+			command.SetCommandString("SELECT file_path FROM attachments WHERE id = ?;");
+			command.AddData(new Core::DatabaseInt(attachmentId));
+			databaseInterface->Query(command);
+
+			Core::Response internResponse;
+			databaseInterface->FetchData(internResponse);
+
+			std::filesystem::path filePath = dir / (const char*)internResponse[0].GetValue();
+
+			Ref<Buffer> serializedData = FileReader::ReadFile(filePath);
+
+			File file;
+			file.Deserialize(serializedData);
+
+			SendFile(file);
+		}
+		else if (message.GetType() == Core::MessageType::UploadFile)
+		{
+			// Deserialize file name and assignment id
+			File file;
+			file.DeserializeWithoutData(message.Body.Content);
+
+			if (!std::filesystem::exists(dir))
+				std::filesystem::create_directories(dir);
+
+			std::filesystem::path fileName = file.GetName();
+			std::filesystem::path filePath = dir / fileName;
+
+			// Resolve file name collisions
+			int counter = 1;
+			while (std::filesystem::exists(filePath))
+			{
+				filePath = dir / file.GetName();
+				fileName = filePath.filename().string() + "(" + std::to_string(counter) + ")";
+				filePath = dir / fileName;
+				counter++;
+			}
+
+			// Create attachment in db
+			Core::Command command;
+			command.SetType(Core::CommandType::Command);
+
+			command.SetCommandString("INSERT INTO attachments (assignment_id, file_path, by_user) VALUES (?, ?, ?);");
+			command.AddData(new Core::DatabaseInt(file.GetId()));
+			command.AddData(new Core::DatabaseString(fileName.string().c_str()));
+			command.AddData(new Core::DatabaseBool(file.IsByUser()));
+			databaseInterface->Execute(command);
+
+			FileWriter::WriteFile(filePath, message.Body.Content);
+
+			Core::Response response(10);
+			SendResponseToAllClients(response);
+		}
 
 		messageQueue.Pop();
+		
+	#ifdef LOW_BANDWIDTH
+		std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+	#endif
 	}
 
 	void ServerApp::SendResponse(Core::Response& response)
@@ -206,7 +306,7 @@ namespace Server
 			Core::Response response(5);
 			SendResponseToAllClients(response);
 		}
-		else if (tableName == "assignments" || tableName == "users_assignments")
+		else if (tableName == "assignments" || tableName == "users_assignments" || tableName == "attachments")
 		{
 			Core::Response response(10);
 			SendResponseToAllClients(response);
@@ -243,6 +343,20 @@ namespace Server
 				SendResponseToAllClients(response);
 			}
 		}
+	}
+
+	void ServerApp::SendFile(File& file)
+	{
+		Core::Message& message = messageQueue.Get();
+
+		Ref<Core::Message> responseMessaage = CreateRef<Core::Message>();
+		responseMessaage->Header.Type = Core::MessageType::DownloadFile;
+		responseMessaage->Header.SessionId = message.GetSessionId();
+
+		responseMessaage->Body.Content = file.GetData();
+		responseMessaage->Header.Size = responseMessaage->Body.Content->GetSize();
+
+		networkInterface->SendMessagePackets(responseMessaage);
 	}
 }
 

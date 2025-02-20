@@ -1,5 +1,6 @@
 #pragma once
-#include "User.h"
+#include "Client/Teams/User.h"
+#include "Utils/File.h"
 
 namespace Client
 {
@@ -16,12 +17,21 @@ namespace Client
 	class Assignment
 	{
 	public:
-		Assignment(uint32_t id, const char* name, const char* desc, const char* data_path, AssignmentStatus status, uint32_t rating, const char* rating_desc, time_t deadline, time_t submitTime)
+		Assignment(uint32_t id, const char* name, const char* desc, AssignmentStatus status, uint32_t rating, const char* rating_desc, time_t deadline, time_t submitTime)
 			: id(id), name(name), description(desc), status(status), rating(rating), rating_description(rating_desc), deadline(deadline), submitTime(submitTime) {}
 
 		inline const uint32_t GetId() const { return id; }
 		inline UserMap& GetUsers() { return users; }
 		inline const uint32_t GetUserCount() const { return users.size(); }
+		inline std::vector<Ref<File>>& GetAttachments() { return attachments; }
+
+		inline const uint32_t GetUserAttachmentCount() const { return std::count_if(attachments.begin(), attachments.end(), [](const Ref<File>& attachment) {
+			return attachment->IsByUser();
+		}); }
+
+		inline const uint32_t GetOwnerAttachmentCount() const { return std::count_if(attachments.begin(), attachments.end(), [](const Ref<File>& attachment) {
+			return !attachment->IsByUser();
+		}); }
 
 		inline const time_t GetDeadLine() const { return deadline; }
 		inline const time_t GetSubmitTime() const { return submitTime; }
@@ -43,6 +53,10 @@ namespace Client
 		void AddUser(Ref<User> user) { users[user->GetId()] = user; }
 		void RemoveUser(uint32_t id) { users.erase(id); }
 		void ClearUsers() { users.clear(); }
+
+		void AddAttachment(Ref<File> attachment) { attachments.push_back(attachment); }
+		void RemoveAttachment(uint32_t index) { attachments.erase(attachments.begin() + index); }
+		void ClearAttachments() { attachments.clear(); }
 	private:
 		uint32_t id;
 		UserMap users;
@@ -55,6 +69,8 @@ namespace Client
 
 		time_t deadline;
 		time_t submitTime;
+
+		std::vector<Ref<File>> attachments;
 	};
 
 	struct AssignmentData
@@ -66,7 +82,7 @@ namespace Client
 
 		AssignmentData& operator=(const Ref<Assignment>& asssignment)
 		{
-			users.clear();
+			users = asssignment->GetUsers();
 			AssignmentId = asssignment->GetId();
 			UpdateDeadLine();
 
@@ -85,8 +101,14 @@ namespace Client
 		inline const uint32_t GetUserCount() const { return users.size(); }
 		inline UserMap& GetUsers() { return users; }
 
+		inline const uint32_t GetAttachmentCount() const { return attachments.size(); }
+		inline std::vector<Ref<File>>& GetAttachments() { return attachments; }
+
 		void AddUser(Ref<User> user) { users[user->GetId()] = user; }
 		void RemoveUser(uint32_t id) { users.erase(id); }
+
+		void AddAttachment(Ref<File> attachment) { attachments.push_back(attachment); }
+		void RemoveAttachment(uint32_t index) { attachments.erase(attachments.begin() + index); }
 
 		// Set deadline time to 23:59:59
 		void UpdateDeadLine()
@@ -104,7 +126,10 @@ namespace Client
 		time_t DeadLine = time(nullptr);;
 		tm DeadLineTm = *localtime(&DeadLine);;
 		int AssignmentId = -1;
+
+		CreateAssignmentErrorType Error = CreateAssignmentErrorType::None; // Error for creating assignment
 	private:
 		UserMap users;
+		std::vector<Ref<File>> attachments;
 	};
 }
